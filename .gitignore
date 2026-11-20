@@ -1,0 +1,15 @@
+# Flutter/Dart
+.dart_tool/
+.packages
+.pub/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.metadata
+android/.gradle/
+android/local.properties
+android/key.properties
+*.iml
+.idea/
+.vscode/
+# Temporary captured card images and local data
