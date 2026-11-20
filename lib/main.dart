@@ -104,7 +104,7 @@ class _BatchHomeState extends State<BatchHome> {
           SizedBox(width: 130, child: ListView.builder(itemCount: cards.length, itemBuilder: (_, i) { final card=cards[i]; return ListTile(dense: true, selected: card==selected, selectedTileColor: const Color(0xff27292d), leading: CircleAvatar(backgroundColor: const Color(0xff303137), child: Text((card.name.isEmpty?'?':card.name[0]).toUpperCase())), title: Text(card.name.isEmpty?'Untitled':card.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12)), subtitle: Text(card.company.isEmpty?'No company':card.company, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10)), onTap: () => setState(() => selected=card)); })),
           const VerticalDivider(width: 1),
           Expanded(child: selected == null ? const SizedBox.shrink() : _editor(selected!)),
-        ]))),
+        ])),
         if (cards.isNotEmpty) Container(padding: const EdgeInsets.all(12), decoration: const BoxDecoration(border: Border(top: BorderSide(color: Colors.white12))), child: Row(children: [Text('${cards.length} staged', style: const TextStyle(color: Colors.white54)), const Spacer(), TextButton.icon(onPressed: exportBatch, icon: const Icon(Icons.file_download_outlined), label: const Text('Export batch JSON'))])),
       ])),
     );
