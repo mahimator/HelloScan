@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HelloScan Lab Training Sample",
+  "type": "object",
+  "required": ["sample_id", "images", "target"],
+  "properties": {
+    "sample_id": {"type": "string"},
+    "images": {
+      "type": "object",
+      "required": ["front"],
+      "properties": {
+        "front": {"type": "string", "description": "Relative image path"},
+        "back": {"type": ["string", "null"], "description": "Relative image path"}
+      },
+      "additionalProperties": false
+    },
+    "target": {
+      "type": "object",
+      "required": ["person", "organization", "contact", "location", "notes"],
+      "properties": {
+        "person": {
+          "type": "object",
+          "required": ["name", "designation"],
+          "properties": {
+            "name": {"type": ["string", "null"]},
+            "designation": {"type": ["string", "null"]}
+          },
+          "additionalProperties": false
+        },
+        "organization": {
+          "type": "object",
+          "required": ["name", "website"],
+          "properties": {
+            "name": {"type": ["string", "null"]},
+            "website": {"type": ["string", "null"]}
+          },
+          "additionalProperties": false
+        },
+        "contact": {
+          "type": "object",
+          "required": ["emails", "phones"],
+          "properties": {
+            "emails": {"type": "array", "items": {"type": "string"}},
+            "phones": {"type": "array", "items": {"type": "string"}}
+          },
+          "additionalProperties": false
+        },
+        "location": {
+          "type": "object",
+          "required": ["full_address"],
+          "properties": {
+            "full_address": {"type": ["string", "null"]}
+          },
+          "additionalProperties": false
+        },
+        "notes": {"type": ["string", "null"]}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
