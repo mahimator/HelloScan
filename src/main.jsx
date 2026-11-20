@@ -38,6 +38,13 @@ function HelloScan() {
     setCards(prev => [card, ...prev]);
     setSelected(card.id);
   };
+  const attachImage = (file, side, cardId) => {
+    if (!file || !file.type.startsWith("image/")) return;
+    const image = { name: file.name, url: URL.createObjectURL(file) };
+    const target = cards.find(c => c.id === cardId);
+    if (target?.[side]?.url) URL.revokeObjectURL(target[side].url);
+    update(cardId, { [side]: image, sideMode: side });
+  };
   const importImages = (files, side) => {
     const incoming = Array.from(files || []).filter(f => f.type.startsWith("image/"));
     if (!incoming.length) return;
@@ -62,8 +69,12 @@ function HelloScan() {
       schema: "helloscan.contact-batch.v1",
       exported_at: new Date().toISOString(),
       total: cards.length,
-      contacts: cards.map(({id,front,back,sideMode,status,...contact}) => ({
-        ...contact,
+      contacts: cards.map(({id,front,back,sideMode,status,person,title,company,email,phone,website,address,notes}) => ({
+        person: { name: person || null, designation: title || null },
+        organization: { name: company || null, website: website || null },
+        contact: { emails: email ? [email] : [], phones: phone ? [phone] : [] },
+        location: { full_address: address || null },
+        notes: notes || null,
         source: { sides: [front && "front", back && "back"].filter(Boolean), review_status: status }
       }))
     };
@@ -126,7 +137,7 @@ function HelloScan() {
           {active ? <>
             <div className="editor-head"><div><span className="section-label">CARD REVIEW</span><h2>Contact details</h2></div><button className="icon-button danger" title="Remove card" onClick={()=>removeCard(active.id)}><Trash2 size={17}/></button></div>
             <div className="image-pair">
-              <div className="side-preview"><div className="side-head"><span>FRONT</span>{active.front?.name&&<span className="file-name">{active.front.name}</span>}</div>{active.front?<img src={active.front.url} alt="Card front"/>:<button className="image-placeholder" onClick={()=>frontInput.current?.click()}><ImagePlus size={21}/><span>Add front image</span></button>}</div>
+              <div className="side-preview"><div className="side-head"><span>FRONT</span>{active.front?.name&&<span className="file-name">{active.front.name}</span>}</div>{active.front?<img src={active.front.url} alt="Card front"/>:<button className="image-placeholder" onClick={()=>active.id && frontInput.current?.click()}><ImagePlus size={21}/><span>Add front image</span></button>}</div>
               <div className="side-preview"><div className="side-head"><span>BACK</span>{active.back?.name&&<span className="file-name">{active.back.name}</span>}</div>{active.back?<img src={active.back.url} alt="Card back"/>:<button className="image-placeholder" onClick={()=>backInput.current?.click()}><ImagePlus size={21}/><span>Add back image</span></button>}</div>
             </div>
             <div className="fields">
