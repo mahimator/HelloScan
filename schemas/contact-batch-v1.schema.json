@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://helloscan.app/schemas/contact-batch-v1.json",
+  "title": "HelloScan Contact Batch",
+  "type": "object",
+  "required": ["schema", "exported_at", "total", "contacts"],
+  "properties": {
+    "schema": { "const": "helloscan.contact-batch.v1" },
+    "exported_at": { "type": "string", "format": "date-time" },
+    "total": { "type": "integer", "minimum": 0 },
+    "contacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["person", "organization", "contact", "location", "source"],
+        "properties": {
+          "person": {
+            "type": "object",
+            "properties": {
+              "name": { "type": ["string", "null"] },
+              "designation": { "type": ["string", "null"] }
+            }
+          },
+          "organization": {
+            "type": "object",
+            "properties": {
+              "name": { "type": ["string", "null"] },
+              "website": { "type": ["string", "null"] }
+            }
+          },
+          "contact": {
+            "type": "object",
+            "properties": {
+              "emails": { "type": "array", "items": { "type": "string", "format": "email" } },
+              "phones": { "type": "array", "items": { "type": "string" } }
+            }
+          },
+          "location": {
+            "type": "object",
+            "properties": { "full_address": { "type": ["string", "null"] } }
+          },
+          "notes": { "type": ["string", "null"] },
+          "source": {
+            "type": "object",
+            "required": ["sides", "review_status"],
+            "properties": {
+              "sides": { "type": "array", "items": { "enum": ["front", "back"] } },
+              "review_status": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  }
+}
