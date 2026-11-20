@@ -1,22 +1,22 @@
 # HelloScan
 
-Privacy-first visiting card scanner and information extractor.
+HelloScan is an Android-first Flutter app for capturing visiting cards into a temporary batch, reviewing extracted contact details, and exporting CRM-ready JSON. It is **not** a permanent contacts database.
 
-## Current milestone
+## Stack
+- Flutter / Dart
+- Android camera capture via `image_picker`
+- Multi-image gallery import
+- Manual review/editing
+- JSON batch export
+- OCR/model inference planned behind a replaceable interface
 
-- Batch import visiting cards from images.
-- Support front-only, back-only, and front/back paired scans.
-- Review and edit extracted records in a batch.
-- Export a structured JSON batch for CRM ingestion.
-- Keep OCR inference replaceable so the UI is not tied to one model.
+## Current status
+Mobile-first scaffold: scan a front, capture its back, import gallery images, stage cards in memory, edit contact fields, and export a batch JSON file.
 
-## Development
-
-Install dependencies and start the dev server:
-
+## Run
+Install Flutter SDK, then:
 ```bash
-npm install
-npm run dev
+flutter create --platforms android .
+flutter pub get
+flutter run
 ```
-
-The current prototype uses manual review fields and a placeholder extraction adapter. OCR/model integration is not yet implemented.
