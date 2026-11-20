@@ -26,6 +26,7 @@ function HelloScan() {
   const frontInput = useRef(null);
   const backInput = useRef(null);
   const [exportToast, setExportToast] = useState("");
+  const [pendingAttachSide, setPendingAttachSide] = useState(null);
 
   const active = cards.find(c => c.id === selected) || null;
   const filtered = useMemo(() => cards.filter(c =>
@@ -47,6 +48,12 @@ function HelloScan() {
   };
   const importImages = (files, side) => {
     const incoming = Array.from(files || []).filter(f => f.type.startsWith("image/"));
+    if (!incoming.length) return;
+    if (pendingAttachSide && selected) {
+      attachImage(incoming[0], pendingAttachSide, selected);
+      incoming.splice(0, 1);
+      setPendingAttachSide(null);
+    }
     if (!incoming.length) return;
     const newCards = incoming.map(file => {
       const card = emptyCard();
@@ -137,8 +144,8 @@ function HelloScan() {
           {active ? <>
             <div className="editor-head"><div><span className="section-label">CARD REVIEW</span><h2>Contact details</h2></div><button className="icon-button danger" title="Remove card" onClick={()=>removeCard(active.id)}><Trash2 size={17}/></button></div>
             <div className="image-pair">
-              <div className="side-preview"><div className="side-head"><span>FRONT</span>{active.front?.name&&<span className="file-name">{active.front.name}</span>}</div>{active.front?<img src={active.front.url} alt="Card front"/>:<button className="image-placeholder" onClick={()=>active.id && frontInput.current?.click()}><ImagePlus size={21}/><span>Add front image</span></button>}</div>
-              <div className="side-preview"><div className="side-head"><span>BACK</span>{active.back?.name&&<span className="file-name">{active.back.name}</span>}</div>{active.back?<img src={active.back.url} alt="Card back"/>:<button className="image-placeholder" onClick={()=>backInput.current?.click()}><ImagePlus size={21}/><span>Add back image</span></button>}</div>
+              <div className="side-preview"><div className="side-head"><span>FRONT</span>{active.front?.name&&<span className="file-name">{active.front.name}</span>}</div>{active.front?<img src={active.front.url} alt="Card front"/>:<button className="image-placeholder" onClick={()=>{setPendingAttachSide("front");frontInput.current?.click();}}><ImagePlus size={21}/><span>Add front image</span></button>}</div>
+              <div className="side-preview"><div className="side-head"><span>BACK</span>{active.back?.name&&<span className="file-name">{active.back.name}</span>}</div>{active.back?<img src={active.back.url} alt="Card back"/>:<button className="image-placeholder" onClick={()=>{setPendingAttachSide("back");backInput.current?.click();}}><ImagePlus size={21}/><span>Add back image</span></button>}</div>
             </div>
             <div className="fields">
               {fields.map(([key,label])=><label className={"field "+(key==="notes"?"wide":"")} key={key}><span>{label}</span>{key==="notes"?<textarea rows={2} value={active[key]} onChange={e=>update(active.id,{[key]:e.target.value})} placeholder="Additional context…"/>:<input value={active[key]} onChange={e=>update(active.id,{[key]:e.target.value})} placeholder={label}/>}</label>)}
