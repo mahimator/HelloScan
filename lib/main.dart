@@ -126,7 +126,7 @@ class _BatchHomeState extends State<BatchHome> {
       field('Address', card.address, (v)=>setState(()=>card.address=v)),
       field('Notes', card.notes, (v)=>setState(()=>card.notes=v)),
       FilledButton.tonal(onPressed: ()=>setState(()=>card.reviewed=true), child: Text(card.reviewed?'Reviewed ✓':'Mark reviewed')),
-      TextButton.icon(onPressed: ()=>setState(()=>{ cards.remove(card); selected = cards.isEmpty ? null : cards.first; }), icon: const Icon(Icons.delete_outline, color: Colors.redAccent), label: const Text('Remove card', style: TextStyle(color: Colors.redAccent))),
+      TextButton.icon(onPressed: ()=>setState(() { cards.remove(card); selected = cards.isEmpty ? null : cards.first; }), icon: const Icon(Icons.delete_outline, color: Colors.redAccent), label: const Text('Remove card', style: TextStyle(color: Colors.redAccent))),
     ]);
   }
 }
