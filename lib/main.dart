@@ -5,6 +5,8 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
+import 'models/ocr_result.dart';
+import 'services/ocr_config.dart';
 import 'services/ocr_service.dart';
 
 void main() => runApp(const HelloScanApp());
@@ -108,6 +110,7 @@ class _BatchHomeState extends State<BatchHome> {
   int counter = 0;
   final ocr = OcrService.instance;
   bool ocrReady = false;
+  bool ocrRunning = false;
 
   @override
   void initState() {
@@ -116,7 +119,17 @@ class _BatchHomeState extends State<BatchHome> {
   }
 
   Future<void> _initOcr() async {
-    final ok = await ocr.init();
+    final ok = await ocr.init(
+      config: const OcrConfig(
+        // Samsung A/M series friendly: small inputs, NNAPI enabled.
+        detInputWidth: 320,
+        detInputHeight: 320,
+        recInputWidth: 128,
+        recInputHeight: 32,
+        maxDetections: 40,
+        useNnapi: true,
+      ),
+    );
     if (mounted) setState(() => ocrReady = ok);
   }
 
@@ -128,7 +141,7 @@ class _BatchHomeState extends State<BatchHome> {
       cards.insert(0, card);
       selected = card;
     });
-    _runOcr(card, image);
+    _runOcrPipeline(card, image.path);
   }
 
   Future<void> captureBack() async {
@@ -137,7 +150,10 @@ class _BatchHomeState extends State<BatchHome> {
       return;
     }
     final image = await picker.pickImage(source: ImageSource.camera, imageQuality: 92);
-    if (image != null) setState(() => selected!.back = image);
+    if (image != null) {
+      setState(() => selected!.back = XFile(image.path));
+      _runOcrPipeline(selected!, image.path, backPath: image.path);
+    }
   }
 
   Future<void> importGallery() async {
@@ -146,15 +162,14 @@ class _BatchHomeState extends State<BatchHome> {
     final newCards = <ScanCard>[];
     setState(() {
       for (final image in images) {
-        final card = ScanCard(id: 'card-${++counter}', front: image);
+        final card = ScanCard(id: 'card-${++counter}', front: XFile(image.path));
         cards.insert(0, card);
         newCards.add(card);
       }
       selected = cards.first;
     });
-    // Auto-run OCR on each newly imported front (review-first; user edits after).
     for (final card in newCards) {
-      if (card.front != null) await _runOcr(card, card.front!);
+      if (card.front != null) _runOcrPipeline(card, card.front!.path);
     }
     if (mounted) _snack('Imported ${newCards.length} card(s) — review OCR pre-fill.');
   }
@@ -167,22 +182,31 @@ class _BatchHomeState extends State<BatchHome> {
     });
   }
 
-  /// Run OCR on a freshly captured front and pre-fill fields (review-first).
-  Future<void> _runOcr(ScanCard card, XFile image) async {
+  /// Run detection + recognition pipeline on a card image.
+  ///
+  /// If [backPath] is provided, both sides are processed and fields merged.
+  /// Pre-fills only empty fields so manual edits are never clobbered.
+  Future<void> _runOcrPipeline(
+    ScanCard card,
+    String frontPath, {
+    String? backPath,
+  }) async {
     if (!ocrReady) {
-      _snack('OCR model not loaded yet — edit fields manually.');
+      if (mounted) _snack('OCR model not loaded yet — edit fields manually.');
       return;
     }
-    final lines = await ocr.recognize(File(image.path));
-    if (lines.isEmpty) {
-      _snack('OCR found no text — edit fields manually.');
-      return;
-    }
-    final fields = OcrService.parseFields(lines);
-    if (!mounted) return;
-    setState(() {
-      // Only auto-fill if the card still has empty fields so we don't clobber
-      // a card the user has already started editing.
+
+    setState(() => ocrRunning = true);
+
+    try {
+      final result = await ocr.recognizeCard(
+        front: File(frontPath),
+        back: backPath != null ? File(backPath) : null,
+      );
+
+      if (!mounted) return;
+
+      // Only auto-fill if the card still has empty fields.
       if (card.name.isEmpty &&
           card.title.isEmpty &&
           card.company.isEmpty &&
@@ -190,10 +214,25 @@ class _BatchHomeState extends State<BatchHome> {
           card.phone.isEmpty &&
           card.website.isEmpty &&
           card.address.isEmpty) {
-        card.applyOcr(fields);
+        card.applyOcr(result.mergedFields);
       }
-    });
-    _snack('OCR pre-fill ready — review the fields, then mark reviewed.');
+
+      setState(() => ocrRunning = false);
+
+      if (result.isEmpty) {
+        _snack('OCR found no text — edit fields manually.');
+      } else {
+        final sides = result.back == null ? 'front' : 'front + back';
+        _snack(
+          'OCR complete ($sides, ${result.totalProcessingTimeMs}ms) — review fields, then mark reviewed.',
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => ocrRunning = false);
+        _snack('OCR failed — edit fields manually.');
+      }
+    }
   }
 
   Future<void> exportBatch() async {
@@ -223,7 +262,10 @@ class _BatchHomeState extends State<BatchHome> {
           'Images are not exported unless you save the JSON first.',
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
             child: const Text('Clear all', style: TextStyle(color: Colors.redAccent)),
@@ -243,6 +285,28 @@ class _BatchHomeState extends State<BatchHome> {
   void _snack(String message) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
 
+  /// Manually trigger OCR on the selected card (front + back if both scanned).
+  Future<void> _ocrSelected() async {
+    if (selected == null || selected!.front == null) return;
+
+    setState(() => ocrRunning = true);
+    try {
+      final result = await ocr.recognizeCard(
+        front: File(selected!.front!.path),
+        back: selected!.back != null ? File(selected!.back!.path) : null,
+      );
+      if (!mounted) return;
+      setState(() => ocrRunning = false);
+      setState(() => selected!.applyOcr(result.mergedFields));
+      _snack('OCR pre-fill applied — review the fields.');
+    } catch (_) {
+      if (mounted) {
+        setState(() => ocrRunning = false);
+        _snack('OCR failed — edit fields manually.');
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -251,7 +315,7 @@ class _BatchHomeState extends State<BatchHome> {
         actions: [
           if (ocrReady)
             IconButton(
-              onPressed: cards.isEmpty ? null : () => _ocrSelected(),
+              onPressed: (cards.isEmpty || ocrRunning) ? null : _ocrSelected,
               icon: const Icon(Icons.text_fields_outlined),
               tooltip: 'Auto-fill selected card from OCR',
             ),
@@ -301,17 +365,17 @@ class _BatchHomeState extends State<BatchHome> {
                 runSpacing: 8,
                 children: [
                   FilledButton.icon(
-                    onPressed: captureFront,
+                    onPressed: ocrRunning ? null : captureFront,
                     icon: const Icon(Icons.camera_alt_outlined),
                     label: const Text('Scan card'),
                   ),
                   OutlinedButton.icon(
-                    onPressed: captureBack,
+                    onPressed: ocrRunning ? null : captureBack,
                     icon: const Icon(Icons.flip_outlined),
                     label: const Text('Scan back'),
                   ),
                   OutlinedButton.icon(
-                    onPressed: importGallery,
+                    onPressed: ocrRunning ? null : importGallery,
                     icon: const Icon(Icons.photo_library_outlined),
                     label: const Text('Gallery'),
                   ),
@@ -323,6 +387,22 @@ class _BatchHomeState extends State<BatchHome> {
                 ],
               ),
             ),
+            if (ocrRunning)
+              const Padding(
+                padding: EdgeInsets.all(8),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    SizedBox(width: 8),
+                    Text('Running OCR...', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                  ],
+                ),
+              ),
             const SizedBox(height: 10),
             Expanded(
               child: cards.isEmpty
@@ -414,28 +494,16 @@ class _BatchHomeState extends State<BatchHome> {
     );
   }
 
-  /// Manually trigger OCR on the currently selected card's front.
-  Future<void> _ocrSelected() async {
-    if (selected == null || selected!.front == null) return;
-    final lines = await ocr.recognize(File(selected!.front!.path));
-    if (lines.isEmpty) {
-      _snack('OCR found no text — edit fields manually.');
-      return;
-    }
-    final fields = OcrService.parseFields(lines);
-    setState(() => selected!.applyOcr(fields));
-    _snack('OCR pre-fill applied — review the fields, then mark reviewed.');
-  }
-
   Widget _editor(ScanCard card) {
-    Widget field(String label, String value, ValueChanged<String> onChanged) =>
+    Widget field(String label, String value, ValueChanged<String> onChanged,
+        {String? hint}) =>
         Padding(
           padding: const EdgeInsets.only(bottom: 10),
           child: TextFormField(
             initialValue: value,
             decoration: InputDecoration(
               labelText: label,
-              hintText: card.ocrPending ? 'OCR pre-fill • review me' : null,
+              hintText: hint,
             ),
             onChanged: onChanged,
           ),
@@ -469,6 +537,9 @@ class _BatchHomeState extends State<BatchHome> {
             ),
           ),
         );
+
+    final ocrHint = card.ocrPending ? 'OCR pre-fill • review me' : null;
+
     return ListView(
       padding: const EdgeInsets.all(12),
       children: [
@@ -478,24 +549,36 @@ class _BatchHomeState extends State<BatchHome> {
               final x = await picker.pickImage(source: ImageSource.camera);
               if (x != null) {
                 setState(() => card.front = x);
-                _runOcr(card, x);
+                _runOcrPipeline(card, x.path,
+                    backPath: card.back?.path);
               }
             }),
             imageTile(card.back, 'Back', () async {
               final x = await picker.pickImage(source: ImageSource.camera);
-              if (x != null) setState(() => card.back = x);
+              if (x != null) {
+                setState(() => card.back = x);
+                _runOcrPipeline(card, card.front?.path ?? '', backPath: x.path);
+              }
             }),
           ],
         ),
         const SizedBox(height: 14),
-        field('Full name', card.name, (v) => setState(() => card.name = v)),
-        field('Designation', card.title, (v) => setState(() => card.title = v)),
-        field('Company', card.company, (v) => setState(() => card.company = v)),
-        field('Email', card.email, (v) => setState(() => card.email = v)),
-        field('Phone', card.phone, (v) => setState(() => card.phone = v)),
-        field('Website', card.website, (v) => setState(() => card.website = v)),
-        field('Address', card.address, (v) => setState(() => card.address = v)),
-        field('Notes', card.notes, (v) => setState(() => card.notes = v)),
+        field('Full name', card.name, (v) => setState(() => card.name = v),
+            hint: ocrHint),
+        field('Designation', card.title, (v) => setState(() => card.title = v),
+            hint: ocrHint),
+        field('Company', card.company, (v) => setState(() => card.company = v),
+            hint: ocrHint),
+        field('Email', card.email, (v) => setState(() => card.email = v),
+            hint: ocrHint),
+        field('Phone', card.phone, (v) => setState(() => card.phone = v),
+            hint: ocrHint),
+        field('Website', card.website, (v) => setState(() => card.website = v),
+            hint: ocrHint),
+        field('Address', card.address, (v) => setState(() => card.address = v),
+            hint: ocrHint),
+        field('Notes', card.notes, (v) => setState(() => card.notes = v),
+            hint: ocrHint),
         const SizedBox(height: 8),
         Row(
           children: [
@@ -506,15 +589,9 @@ class _BatchHomeState extends State<BatchHome> {
               ),
             ),
             const SizedBox(width: 8),
-            if (card.ocrPending)
+            if (card.ocrPending && card.front != null)
               OutlinedButton.icon(
-                onPressed: () async {
-                  final lines = await ocr.recognize(File(card.front!.path));
-                  if (lines.isNotEmpty) {
-                    setState(() => card.applyOcr(OcrService.parseFields(lines)));
-                    _snack('OCR pre-fill applied — review the fields.');
-                  }
-                },
+                onPressed: ocrRunning ? null : () => _ocrSelected(),
                 icon: const Icon(Icons.refresh, size: 18),
                 label: const Text('Re-OCR', style: TextStyle(fontSize: 12)),
               ),

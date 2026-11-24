@@ -22,5 +22,6 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/models/ocr.tflite
+    - assets/models/det.tflite
+    - assets/models/rec.tflite
     - assets/models/labels.txt
