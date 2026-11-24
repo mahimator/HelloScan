@@ -4,10 +4,15 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'models/ocr_result.dart';
+import 'screens/tier_selection.dart';
 import 'services/ocr_config.dart';
 import 'services/ocr_service.dart';
+import 'services/phone_tier.dart';
 
 void main() => runApp(const HelloScanApp());
 
@@ -66,35 +71,107 @@ class ScanCard {
   }
 }
 
-class HelloScanApp extends StatelessWidget {
+class HelloScanApp extends StatefulWidget {
   const HelloScanApp({super.key});
+
   @override
-  Widget build(BuildContext context) => MaterialApp(
-    title: 'HelloScan',
-    debugShowCheckedModeBanner: false,
-    theme: ThemeData.dark().copyWith(
-      scaffoldBackgroundColor: const Color(0xff111216),
-      colorScheme: const ColorScheme.dark(
-        primary: Color(0xffa4f16b),
-        secondary: Color(0xffa4f16b),
-        surface: Color(0xff191a1e),
-      ),
-      appBarTheme: const AppBarTheme(backgroundColor: Color(0xff111216), elevation: 0),
-      inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: const Color(0xff1c1d20),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: Color(0xff303137)),
+  State<HelloScanApp> createState() => _HelloScanAppState();
+}
+
+class _HelloScanAppState extends State<HelloScanApp> {
+  bool _initialized = false;
+  bool _ocrReady = false;
+  Widget _home = const TierSelectionScreen();
+
+  @override
+  void initState() {
+    super.initState();
+    _checkOnboarding();
+  }
+
+  Future<void> _checkOnboarding() async {
+    final prefs = await SharedPreferences.getInstance();
+    final onboarded = prefs.getBool('helloscan.onboarded') ?? false;
+    final tierName = prefs.getString('helloscan.selected_tier');
+
+    if (onboarded && tierName != null) {
+      // Models already downloaded; initialize OCR from stored files.
+      await _initOcrFromStorage(tierName);
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _initialized = true;
+      _home = onboarded ? const BatchHome() : const TierSelectionScreen();
+    });
+  }
+
+  Future<void> _initOcrFromStorage(String tierName) async {
+    try {
+      final docs = await getApplicationDocumentsDirectory();
+      final detPath = p.join(docs.path, 'helloscan', 'models', 'det_$tierName.tflite');
+      final recPath = p.join(docs.path, 'helloscan', 'models', 'rec_$tierName.tflite');
+      final labelsPath = p.join(docs.path, 'helloscan', 'models', 'labels.txt');
+
+      if (await File(detPath).exists() &&
+          await File(recPath).exists() &&
+          await File(labelsPath).exists()) {
+        // Map tier name back to input size config.
+        final config = PhoneTierConfigs.all.firstWhere(
+          (c) => c.tier.name == tierName,
+          orElse: () => PhoneTierConfigs.all[1], // default to mid
+        );
+
+        final ok = await OcrService.instance.init(
+          detModelPath: detPath,
+          recModelPath: recPath,
+          labelsPath: labelsPath,
+          config: config.toOcrConfig(),
+        );
+        if (mounted) setState(() => _ocrReady = ok);
+      }
+    } catch (_) {
+      // OCR will fall back to manual entry.
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_initialized) {
+      return const MaterialApp(
+        home: Scaffold(
+          body: Center(child: CircularProgressIndicator()),
         ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: Color(0xff303137)),
+      );
+    }
+
+    return MaterialApp(
+      title: 'HelloScan',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData.dark().copyWith(
+        scaffoldBackgroundColor: const Color(0xff111216),
+        colorScheme: const ColorScheme.dark(
+          primary: Color(0xffa4f16b),
+          secondary: Color(0xffa4f16b),
+          surface: Color(0xff191a1e),
+        ),
+        appBarTheme: const AppBarTheme(backgroundColor: Color(0xff111216), elevation: 0),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: const Color(0xff1c1d20),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: const BorderSide(color: Color(0xff303137)),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: const BorderSide(color: Color(0xff303137)),
+          ),
         ),
       ),
-    ),
-    home: const BatchHome(),
-  );
+      home: _home,
+    );
+  }
 }
 
 class BatchHome extends StatefulWidget {
@@ -115,22 +192,8 @@ class _BatchHomeState extends State<BatchHome> {
   @override
   void initState() {
     super.initState();
-    _initOcr();
-  }
-
-  Future<void> _initOcr() async {
-    final ok = await ocr.init(
-      config: const OcrConfig(
-        // Samsung A/M series friendly: small inputs, NNAPI enabled.
-        detInputWidth: 320,
-        detInputHeight: 320,
-        recInputWidth: 128,
-        recInputHeight: 32,
-        maxDetections: 40,
-        useNnapi: true,
-      ),
-    );
-    if (mounted) setState(() => ocrReady = ok);
+    // OCR is already initialized by HelloScanApp on returning users.
+    _ocrReady = true;
   }
 
   Future<void> captureFront() async {

@@ -2,7 +2,6 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'dart:math' as math;
 
-import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:tflite_flutter/tflite_flutter.dart';
 
@@ -31,9 +30,15 @@ class OcrService {
 
   /// Initialize the detection and recognition interpreters.
   ///
-  /// Both models must be INT8 quantized TFLite files bundled in `assets/`.
-  /// The labels file contains one character per line (CRNN vocabulary).
-  Future<bool> init({OcrConfig? config}) async {
+  /// [detModelPath] and [recModelPath] are file system paths to the downloaded
+  /// INT8 TFLite models (typically in the app documents directory).
+  /// [labelsPath] is a file system path to the labels text file.
+  Future<bool> init({
+    required String detModelPath,
+    required String recModelPath,
+    required String labelsPath,
+    OcrConfig? config,
+  }) async {
     _config = config ?? const OcrConfig();
 
     try {
@@ -42,8 +47,8 @@ class OcrService {
       if (_config!.useNnapi) {
         detOpts.addDelegate(NnapiDelegate());
       }
-      _detInterpreter = await Interpreter.fromAsset(
-        _config!.detModelPath,
+      _detInterpreter = await Interpreter.fromFile(
+        File(detModelPath),
         options: detOpts,
       );
 
@@ -52,19 +57,17 @@ class OcrService {
       if (_config!.useNnapi) {
         recOpts.addDelegate(NnapiDelegate());
       }
-      _recInterpreter = await Interpreter.fromAsset(
-        _config!.recModelPath,
+      _recInterpreter = await Interpreter.fromFile(
+        File(recModelPath),
         options: recOpts,
       );
 
-      if (_config!.labelsPath != null) {
-        final labels = await rootBundle.loadString(_config!.labelsPath!);
-        _labels = labels
-            .split('\n')
-            .map((e) => e.trim())
-            .where((e) => e.isNotEmpty)
-            .toList();
-      }
+      final labels = await File(labelsPath).readAsString();
+      _labels = labels
+          .split('\n')
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
 
       _initialized = true;
       return true;

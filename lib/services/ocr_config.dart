@@ -1,16 +1,9 @@
 /// Configuration for the on-device OCR pipeline.
 ///
 /// Optimized for low-to-mid range Android phones (Samsung A/M series).
-/// All models should be INT8 quantized and small enough to keep the APK
-/// under ~10 MB for the ML assets.
 class OcrConfig {
   const OcrConfig({
-    this.detModelPath = 'assets/models/det.tflite',
-    this.recModelPath = 'assets/models/rec.tflite',
-    this.labelsPath = 'assets/models/labels.txt',
-
     /// Detection input size. 320x320 is a good trade-off for A/M series phones.
-    /// Larger = more accurate but slower and more RAM.
     this.detInputWidth = 320,
     this.detInputHeight = 320,
 
@@ -35,9 +28,6 @@ class OcrConfig {
     this.blankIndex = 0,
   });
 
-  final String detModelPath;
-  final String recModelPath;
-  final String? labelsPath;
   final int detInputWidth;
   final int detInputHeight;
   final int recInputWidth;
