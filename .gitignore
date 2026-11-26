@@ -13,3 +13,11 @@ android/key.properties
 .idea/
 .vscode/
 # Temporary captured card images and local data
+android/app/build/
+android/GeneratedPluginRegistrant.java
+android/gradlew
+android/gradle/wrapper/gradle-wrapper.jar
+*.key
+*.keystore
+*.jks
+release/
