@@ -218,15 +218,17 @@ class SemanticCardRefiner {
           .toList();
 
       final prompt = '''
-You classify OCR text from a business card. Do not invent, complete, or correct words.
-Select the person's full name and the organization/company name only when the exact
-text appears in the OCR lines. A slogan, instruction, job title, address, website,
-email, or QR prompt is not a person's name or company. A brand can be a company
-without a legal suffix. If uncertain, return null for that field.
+You classify OCR text from a business card. Return ONLY one JSON object.
 
-Return ONLY one JSON object, for example:
-{"person_name":"Jane Doe","company":"Acme Foods","confidence":0.9}
-Use JSON null when a field cannot be identified.
+Rules:
+- Select the person's full name and the organization/company name ONLY when exact text appears in the OCR lines below.
+- A slogan, instruction, job title, address, website, email, or QR prompt is NOT a person's name or company.
+- A brand can be a company without a legal suffix (e.g. "Samanga Utilities" is a valid company).
+- If a field cannot be identified, return null for that field.
+- confidence: how sure you are (0.0 to 1.0). Be generous — if the text clearly appears in the OCR lines, give 0.8+.
+
+Return format: {"person_name":"Jane Doe","company":"Acme Foods","confidence":0.9}
+Use null for fields you cannot identify.
 
 OCR lines:
 ${jsonEncode(lines)}
@@ -247,7 +249,7 @@ ${jsonEncode(lines)}
 
       print('HelloScan: Neural Engine inference complete');
       final result = _decode(output);
-      if (result == null || result.confidence < 0.55) {
+      if (result == null || result.confidence < 0.35) {
         print('HelloScan: Neural Engine returned low confidence or null');
         _lastInferenceResult = 'low_confidence';
         _inferenceCount++;
