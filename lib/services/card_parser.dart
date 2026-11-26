@@ -1078,9 +1078,1648 @@ class CardParser {
         .toList();
     if (words.isEmpty || words.length > 4) return false;
 
-    // A person's name should have at least 2 words (single words are rarely
-    // full names on business cards).
+    // Names on cards vary widely: full names, surname-first names, and
+    // abbreviated forms such as "M.P. Trivedi". Keep the printed order intact.
     if (words.length < 2) return false;
+
+    final nameToken = RegExp(r"^[A-Za-z][A-Za-z'.-]*$");
+    final initialToken = RegExp(r'^(?:[A-Za-z]\\.?){1,3}
+
+    final lower = trimmed.toLowerCase();
+
+    // Explicit non-name keywords are never a name.
+    if (_nonNameKeywords.contains(lower)) return false;
+
+    // Designation words are never a name.
+    if (_designationKeywords.any((kw) => _hasKeyword(lower, kw))) {
+      return false;
+    }
+
+    // Company vocabulary is a scoring signal, not an absolute exclusion:
+    // legitimate names can contain words that also occur in company names.
+
+    // Email or URL is never a name.
+    if (_emailPattern.hasMatch(trimmed) || _urlPattern.hasMatch(trimmed)) {
+      return false;
+    }
+
+    return true;
+  }
+
+  String _extractName(
+    List<String> lines,
+    List<String> emails,
+    List<String> websites,
+    List<String> phones,
+    String address,
+    ({String text, int index}) designation,
+    String company,
+  ) {
+    var bestIndex = -1;
+    var bestScore = -100;
+
+    for (var i = 0; i < lines.length; i++) {
+      final candidate = _stripLabel(lines[i]);
+      if (!_isLikelyName(candidate)) continue;
+      if (candidate == designation.text || candidate == company) continue;
+      if (address.isNotEmpty && address.contains(candidate)) continue;
+      if (_looksLikePhoneLine(candidate, phones)) continue;
+
+      var score = 0;
+      final words = candidate
+          .split(RegExp(r'\s+'))
+          .where((w) => w.isNotEmpty)
+          .toList();
+
+      if (words.length >= 2 && words.length <= 4) score += 3;
+      if (words.any((word) => RegExp(r'^(?:[A-Za-z]\\.?){1,3}
+          RegExp(r'[A-Z]').hasMatch(candidate)) {
+        score += 1;
+      }
+
+      final titleCase = words.where((word) => _isCapitalized(word)).length;
+      if (titleCase >= (words.length / 2).ceil()) score += 2;
+      if (i <= 2) score += 2;
+
+      if (designation.index >= 0 &&
+          (i == designation.index - 1 || i == designation.index + 1)) {
+        score += 3;
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = i;
+      }
+    }
+
+    if (bestIndex < 0 || bestScore < 2) return '';
+    return _normalizeName(_stripLabel(lines[bestIndex]));
+  }
+
+  bool _isCapitalized(String word) {
+    if (word.isEmpty) return false;
+    final first = word[0];
+    return first == first.toUpperCase() && first != first.toLowerCase();
+  }
+
+  String _normalizeName(String name) {
+    var value = _cleanEntity(name);
+
+    // Strip courtesy titles that OCR may have glued onto the name.
+    value = value.replaceFirst(
+      RegExp(r'^(Mr|Mrs|Ms|Miss|Dr|Prof|Sir|Madam)\s+', caseSensitive: false),
+      '',
+    );
+
+    if (value.toUpperCase() == value && RegExp(r'[A-Z]').hasMatch(value)) {
+      value = value
+          .split(' ')
+          .map((word) {
+            if (RegExp(r'^(?:[A-Z]\\.?){1,3}
+    return value;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Shared helpers
+  // ---------------------------------------------------------------------------
+
+  /// Picks the most reliable host for the card, preferring an explicit website.
+  String _canonicalHost(List<String> websites, List<String> emails) {
+    final ordered = <String>[...websites]
+      ..sort((a, b) => _websiteRank(a).compareTo(_websiteRank(b)));
+    for (final site in ordered) {
+      final host = _hostOf(site);
+      if (host.contains('.') && !_looksLikeFile(host)) return host;
+    }
+    for (final email in emails) {
+      final at = email.indexOf('@');
+      if (at < 0) continue;
+      final host = email.substring(at + 1).toLowerCase();
+      if (!host.contains('.')) continue;
+      final root = _rootLabel(host).toLowerCase();
+      if (!_publicEmailDomains.contains(root)) return host;
+    }
+    return '';
+  }
+
+  int _websiteRank(String site) {
+    final lower = site.toLowerCase();
+    if (lower.startsWith('http://') || lower.startsWith('https://')) return 0;
+    if (lower.startsWith('www.')) return 1;
+    return 2;
+  }
+
+  List<String> _reconcileEmails(List<String> emails, String canonicalHost) {
+    if (canonicalHost.isEmpty) return emails;
+    final canonical = canonicalHost.toLowerCase();
+    return emails.map((email) {
+      final at = email.indexOf('@');
+      if (at <= 0) return email;
+      final domain = email.substring(at + 1).toLowerCase();
+      if (domain == canonical) return email;
+      if (!_isNearMissDomain(domain, canonical)) return email;
+      return '${email.substring(0, at)}@$canonical';
+    }).toList();
+  }
+
+  /// True when two domains differ only by a likely OCR substitution in the
+  /// registrable name (e.g. `acrme-tech.com` vs `acrne-tech.com`).
+  bool _isNearMissDomain(String a, String b) {
+    final rootA = _rootLabel(a).toLowerCase();
+    final rootB = _rootLabel(b).toLowerCase();
+    if (rootA == rootB) return false;
+    if (rootA.length < 4 || rootB.length < 4) return false;
+    return _editDistance(rootA, rootB) <= 1;
+  }
+
+  /// Repairs company names that were OCR'd one character away from the domain.
+  String _reconcileCompany(String company, String canonicalHost) {
+    if (company.isEmpty || canonicalHost.isEmpty) return company;
+    final root = _rootLabel(canonicalHost).toLowerCase();
+    final candidates = <String>{
+      root,
+      ...root.split(RegExp(r'[-_]')),
+    }.where((value) => value.length >= 4).toList();
+    if (candidates.isEmpty) return company;
+
+    var changed = false;
+    final repaired = company
+        .split(' ')
+        .map((word) {
+          final cleaned = word.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
+          if (cleaned.length < 4) return word;
+          final lower = cleaned.toLowerCase();
+          for (final candidate in candidates) {
+            if (lower == candidate) return word;
+            if (_editDistance(lower, candidate) <= 1) {
+              changed = true;
+              return word.replaceFirst(
+                RegExp(RegExp.escape(cleaned)),
+                _titleCaseWords(candidate),
+              );
+            }
+          }
+          return word;
+        })
+        .join(' ');
+
+    return changed ? repaired : company;
+  }
+
+  int _editDistance(String a, String b) {
+    final row = List<int>.generate(b.length + 1, (index) => index);
+    for (var i = 1; i <= a.length; i++) {
+      var diagonal = row[0];
+      row[0] = i;
+      for (var j = 1; j <= b.length; j++) {
+        final above = row[j];
+        final cost = a[i - 1] == b[j - 1] ? 0 : 1;
+        final insertion = row[j] + 1;
+        final deletion = row[j - 1] + 1;
+        final substitution = diagonal + cost;
+        row[j] = _min3(insertion, deletion, substitution);
+        diagonal = above;
+      }
+    }
+    return row[b.length];
+  }
+
+  int _min3(int a, int b, int c) {
+    final min = a < b ? a : b;
+    return min < c ? min : c;
+  }
+
+  bool _hasKeyword(String haystack, String keyword) {
+    final escaped = RegExp.escape(keyword);
+    return RegExp('(^|[^a-z0-9])$escaped([^a-z0-9]|\$)').hasMatch(haystack);
+  }
+
+  String _stripLabel(String line) {
+    var value = line.trim();
+    final match = RegExp(
+      r'^([A-Za-z][A-Za-z .\-]{0,15})\s*[:\-]\s*',
+    ).firstMatch(value);
+    if (match != null) {
+      final label = match.group(1)!.trim().toLowerCase();
+      final isKnownLabel = label.length == 1
+          ? _singleLetterLabels.contains(label)
+          : _labelStrips.contains(label) ||
+                _labelStrips.any(
+                  (known) => known.length > 1 && label.startsWith(known),
+                );
+      if (isKnownLabel) value = value.substring(match.end);
+    }
+    return value.trim();
+  }
+
+  String _cleanEntity(String value) {
+    var cleaned = value.trim().replaceAll(RegExp(r'\s+'), ' ');
+    cleaned = cleaned.replaceAll(RegExp(r'^[.,;:\-]+|[.,;:\-]+$'), '');
+    cleaned = cleaned.replaceAllMapped(
+      RegExp(r'([A-Za-z])\.([A-Z][a-z])'),
+      (match) => '${match[1]}. ${match[2]}',
+    );
+    return cleaned.trim();
+  }
+
+  String _titleCaseWords(String value) {
+    return value
+        .split(RegExp(r'\s+'))
+        .where((word) => word.isNotEmpty)
+        .map((word) => word[0].toUpperCase() + word.substring(1).toLowerCase())
+        .join(' ');
+  }
+}
+);
+    if (words.any((word) =>
+        !nameToken.hasMatch(word) && !initialToken.hasMatch(word))) {
+      return false;
+    }
+
+    final lower = trimmed.toLowerCase();
+
+    // Explicit non-name keywords are never a name.
+    if (_nonNameKeywords.contains(lower)) return false;
+
+    // Designation words are never a name.
+    if (_designationKeywords.any((kw) => _hasKeyword(lower, kw))) {
+      return false;
+    }
+
+    // Company keywords are never a name.
+    if (_companyKeywords.any((kw) => _hasKeyword(lower, kw))) {
+      return false;
+    }
+
+    // Email or URL is never a name.
+    if (_emailPattern.hasMatch(trimmed) || _urlPattern.hasMatch(trimmed)) {
+      return false;
+    }
+
+    return true;
+  }
+
+  String _extractName(
+    List<String> lines,
+    List<String> emails,
+    List<String> websites,
+    List<String> phones,
+    String address,
+    ({String text, int index}) designation,
+    String company,
+  ) {
+    var bestIndex = -1;
+    var bestScore = -100;
+
+    for (var i = 0; i < lines.length; i++) {
+      final candidate = _stripLabel(lines[i]);
+      if (!_isLikelyName(candidate)) continue;
+      if (candidate == designation.text || candidate == company) continue;
+      if (address.isNotEmpty && address.contains(candidate)) continue;
+      if (_looksLikePhoneLine(candidate, phones)) continue;
+
+      var score = 0;
+      final words = candidate
+          .split(RegExp(r'\s+'))
+          .where((w) => w.isNotEmpty)
+          .toList();
+
+      if (words.length >= 2 && words.length <= 4) score += 3;
+      if (candidate == candidate.toUpperCase() &&
+          RegExp(r'[A-Z]').hasMatch(candidate)) {
+        score += 1;
+      }
+
+      final titleCase = words.where((word) => _isCapitalized(word)).length;
+      if (titleCase >= (words.length / 2).ceil()) score += 2;
+      if (i <= 2) score += 2;
+
+      if (designation.index >= 0 &&
+          (i == designation.index - 1 || i == designation.index + 1)) {
+        score += 3;
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = i;
+      }
+    }
+
+    if (bestIndex < 0 || bestScore < 2) return '';
+    return _normalizeName(_stripLabel(lines[bestIndex]));
+  }
+
+  bool _isCapitalized(String word) {
+    if (word.isEmpty) return false;
+    final first = word[0];
+    return first == first.toUpperCase() && first != first.toLowerCase();
+  }
+
+  String _normalizeName(String name) {
+    var value = _cleanEntity(name);
+
+    // Strip courtesy titles that OCR may have glued onto the name.
+    value = value.replaceFirst(
+      RegExp(r'^(Mr|Mrs|Ms|Miss|Dr|Prof|Sir|Madam)\s+', caseSensitive: false),
+      '',
+    );
+
+    if (value.toUpperCase() == value && RegExp(r'[A-Z]').hasMatch(value)) {
+      value = value
+          .split(' ')
+          .map(
+            (word) => word
+                .split('-')
+                .map((part) {
+                  if (part.isEmpty) return part;
+                  return part[0].toUpperCase() +
+                      part.substring(1).toLowerCase();
+                })
+                .join('-'),
+          )
+          .join(' ');
+    }
+    return value;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Shared helpers
+  // ---------------------------------------------------------------------------
+
+  /// Picks the most reliable host for the card, preferring an explicit website.
+  String _canonicalHost(List<String> websites, List<String> emails) {
+    final ordered = <String>[...websites]
+      ..sort((a, b) => _websiteRank(a).compareTo(_websiteRank(b)));
+    for (final site in ordered) {
+      final host = _hostOf(site);
+      if (host.contains('.') && !_looksLikeFile(host)) return host;
+    }
+    for (final email in emails) {
+      final at = email.indexOf('@');
+      if (at < 0) continue;
+      final host = email.substring(at + 1).toLowerCase();
+      if (!host.contains('.')) continue;
+      final root = _rootLabel(host).toLowerCase();
+      if (!_publicEmailDomains.contains(root)) return host;
+    }
+    return '';
+  }
+
+  int _websiteRank(String site) {
+    final lower = site.toLowerCase();
+    if (lower.startsWith('http://') || lower.startsWith('https://')) return 0;
+    if (lower.startsWith('www.')) return 1;
+    return 2;
+  }
+
+  List<String> _reconcileEmails(List<String> emails, String canonicalHost) {
+    if (canonicalHost.isEmpty) return emails;
+    final canonical = canonicalHost.toLowerCase();
+    return emails.map((email) {
+      final at = email.indexOf('@');
+      if (at <= 0) return email;
+      final domain = email.substring(at + 1).toLowerCase();
+      if (domain == canonical) return email;
+      if (!_isNearMissDomain(domain, canonical)) return email;
+      return '${email.substring(0, at)}@$canonical';
+    }).toList();
+  }
+
+  /// True when two domains differ only by a likely OCR substitution in the
+  /// registrable name (e.g. `acrme-tech.com` vs `acrne-tech.com`).
+  bool _isNearMissDomain(String a, String b) {
+    final rootA = _rootLabel(a).toLowerCase();
+    final rootB = _rootLabel(b).toLowerCase();
+    if (rootA == rootB) return false;
+    if (rootA.length < 4 || rootB.length < 4) return false;
+    return _editDistance(rootA, rootB) <= 1;
+  }
+
+  /// Repairs company names that were OCR'd one character away from the domain.
+  String _reconcileCompany(String company, String canonicalHost) {
+    if (company.isEmpty || canonicalHost.isEmpty) return company;
+    final root = _rootLabel(canonicalHost).toLowerCase();
+    final candidates = <String>{
+      root,
+      ...root.split(RegExp(r'[-_]')),
+    }.where((value) => value.length >= 4).toList();
+    if (candidates.isEmpty) return company;
+
+    var changed = false;
+    final repaired = company
+        .split(' ')
+        .map((word) {
+          final cleaned = word.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
+          if (cleaned.length < 4) return word;
+          final lower = cleaned.toLowerCase();
+          for (final candidate in candidates) {
+            if (lower == candidate) return word;
+            if (_editDistance(lower, candidate) <= 1) {
+              changed = true;
+              return word.replaceFirst(
+                RegExp(RegExp.escape(cleaned)),
+                _titleCaseWords(candidate),
+              );
+            }
+          }
+          return word;
+        })
+        .join(' ');
+
+    return changed ? repaired : company;
+  }
+
+  int _editDistance(String a, String b) {
+    final row = List<int>.generate(b.length + 1, (index) => index);
+    for (var i = 1; i <= a.length; i++) {
+      var diagonal = row[0];
+      row[0] = i;
+      for (var j = 1; j <= b.length; j++) {
+        final above = row[j];
+        final cost = a[i - 1] == b[j - 1] ? 0 : 1;
+        final insertion = row[j] + 1;
+        final deletion = row[j - 1] + 1;
+        final substitution = diagonal + cost;
+        row[j] = _min3(insertion, deletion, substitution);
+        diagonal = above;
+      }
+    }
+    return row[b.length];
+  }
+
+  int _min3(int a, int b, int c) {
+    final min = a < b ? a : b;
+    return min < c ? min : c;
+  }
+
+  bool _hasKeyword(String haystack, String keyword) {
+    final escaped = RegExp.escape(keyword);
+    return RegExp('(^|[^a-z0-9])$escaped([^a-z0-9]|\$)').hasMatch(haystack);
+  }
+
+  String _stripLabel(String line) {
+    var value = line.trim();
+    final match = RegExp(
+      r'^([A-Za-z][A-Za-z .\-]{0,15})\s*[:\-]\s*',
+    ).firstMatch(value);
+    if (match != null) {
+      final label = match.group(1)!.trim().toLowerCase();
+      final isKnownLabel = label.length == 1
+          ? _singleLetterLabels.contains(label)
+          : _labelStrips.contains(label) ||
+                _labelStrips.any(
+                  (known) => known.length > 1 && label.startsWith(known),
+                );
+      if (isKnownLabel) value = value.substring(match.end);
+    }
+    return value.trim();
+  }
+
+  String _cleanEntity(String value) {
+    var cleaned = value.trim().replaceAll(RegExp(r'\s+'), ' ');
+    cleaned = cleaned.replaceAll(RegExp(r'^[.,;:\-]+|[.,;:\-]+$'), '');
+    cleaned = cleaned.replaceAllMapped(
+      RegExp(r'([A-Za-z])\.([A-Z][a-z])'),
+      (match) => '${match[1]}. ${match[2]}',
+    );
+    return cleaned.trim();
+  }
+
+  String _titleCaseWords(String value) {
+    return value
+        .split(RegExp(r'\s+'))
+        .where((word) => word.isNotEmpty)
+        .map((word) => word[0].toUpperCase() + word.substring(1).toLowerCase())
+        .join(' ');
+  }
+}
+).hasMatch(word))) {
+        score += 2;
+      }
+      if (_companyKeywords.any((kw) => _hasKeyword(candidate.toLowerCase(), kw))) {
+        score -= 3;
+      }
+      if (candidate == candidate.toUpperCase() &&
+          RegExp(r'[A-Z]').hasMatch(candidate)) {
+        score += 1;
+      }
+
+      final titleCase = words.where((word) => _isCapitalized(word)).length;
+      if (titleCase >= (words.length / 2).ceil()) score += 2;
+      if (i <= 2) score += 2;
+
+      if (designation.index >= 0 &&
+          (i == designation.index - 1 || i == designation.index + 1)) {
+        score += 3;
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = i;
+      }
+    }
+
+    if (bestIndex < 0 || bestScore < 2) return '';
+    return _normalizeName(_stripLabel(lines[bestIndex]));
+  }
+
+  bool _isCapitalized(String word) {
+    if (word.isEmpty) return false;
+    final first = word[0];
+    return first == first.toUpperCase() && first != first.toLowerCase();
+  }
+
+  String _normalizeName(String name) {
+    var value = _cleanEntity(name);
+
+    // Strip courtesy titles that OCR may have glued onto the name.
+    value = value.replaceFirst(
+      RegExp(r'^(Mr|Mrs|Ms|Miss|Dr|Prof|Sir|Madam)\s+', caseSensitive: false),
+      '',
+    );
+
+    if (value.toUpperCase() == value && RegExp(r'[A-Z]').hasMatch(value)) {
+      value = value
+          .split(' ')
+          .map(
+            (word) => word
+                .split('-')
+                .map((part) {
+                  if (part.isEmpty) return part;
+                  return part[0].toUpperCase() +
+                      part.substring(1).toLowerCase();
+                })
+                .join('-'),
+          )
+          .join(' ');
+    }
+    return value;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Shared helpers
+  // ---------------------------------------------------------------------------
+
+  /// Picks the most reliable host for the card, preferring an explicit website.
+  String _canonicalHost(List<String> websites, List<String> emails) {
+    final ordered = <String>[...websites]
+      ..sort((a, b) => _websiteRank(a).compareTo(_websiteRank(b)));
+    for (final site in ordered) {
+      final host = _hostOf(site);
+      if (host.contains('.') && !_looksLikeFile(host)) return host;
+    }
+    for (final email in emails) {
+      final at = email.indexOf('@');
+      if (at < 0) continue;
+      final host = email.substring(at + 1).toLowerCase();
+      if (!host.contains('.')) continue;
+      final root = _rootLabel(host).toLowerCase();
+      if (!_publicEmailDomains.contains(root)) return host;
+    }
+    return '';
+  }
+
+  int _websiteRank(String site) {
+    final lower = site.toLowerCase();
+    if (lower.startsWith('http://') || lower.startsWith('https://')) return 0;
+    if (lower.startsWith('www.')) return 1;
+    return 2;
+  }
+
+  List<String> _reconcileEmails(List<String> emails, String canonicalHost) {
+    if (canonicalHost.isEmpty) return emails;
+    final canonical = canonicalHost.toLowerCase();
+    return emails.map((email) {
+      final at = email.indexOf('@');
+      if (at <= 0) return email;
+      final domain = email.substring(at + 1).toLowerCase();
+      if (domain == canonical) return email;
+      if (!_isNearMissDomain(domain, canonical)) return email;
+      return '${email.substring(0, at)}@$canonical';
+    }).toList();
+  }
+
+  /// True when two domains differ only by a likely OCR substitution in the
+  /// registrable name (e.g. `acrme-tech.com` vs `acrne-tech.com`).
+  bool _isNearMissDomain(String a, String b) {
+    final rootA = _rootLabel(a).toLowerCase();
+    final rootB = _rootLabel(b).toLowerCase();
+    if (rootA == rootB) return false;
+    if (rootA.length < 4 || rootB.length < 4) return false;
+    return _editDistance(rootA, rootB) <= 1;
+  }
+
+  /// Repairs company names that were OCR'd one character away from the domain.
+  String _reconcileCompany(String company, String canonicalHost) {
+    if (company.isEmpty || canonicalHost.isEmpty) return company;
+    final root = _rootLabel(canonicalHost).toLowerCase();
+    final candidates = <String>{
+      root,
+      ...root.split(RegExp(r'[-_]')),
+    }.where((value) => value.length >= 4).toList();
+    if (candidates.isEmpty) return company;
+
+    var changed = false;
+    final repaired = company
+        .split(' ')
+        .map((word) {
+          final cleaned = word.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
+          if (cleaned.length < 4) return word;
+          final lower = cleaned.toLowerCase();
+          for (final candidate in candidates) {
+            if (lower == candidate) return word;
+            if (_editDistance(lower, candidate) <= 1) {
+              changed = true;
+              return word.replaceFirst(
+                RegExp(RegExp.escape(cleaned)),
+                _titleCaseWords(candidate),
+              );
+            }
+          }
+          return word;
+        })
+        .join(' ');
+
+    return changed ? repaired : company;
+  }
+
+  int _editDistance(String a, String b) {
+    final row = List<int>.generate(b.length + 1, (index) => index);
+    for (var i = 1; i <= a.length; i++) {
+      var diagonal = row[0];
+      row[0] = i;
+      for (var j = 1; j <= b.length; j++) {
+        final above = row[j];
+        final cost = a[i - 1] == b[j - 1] ? 0 : 1;
+        final insertion = row[j] + 1;
+        final deletion = row[j - 1] + 1;
+        final substitution = diagonal + cost;
+        row[j] = _min3(insertion, deletion, substitution);
+        diagonal = above;
+      }
+    }
+    return row[b.length];
+  }
+
+  int _min3(int a, int b, int c) {
+    final min = a < b ? a : b;
+    return min < c ? min : c;
+  }
+
+  bool _hasKeyword(String haystack, String keyword) {
+    final escaped = RegExp.escape(keyword);
+    return RegExp('(^|[^a-z0-9])$escaped([^a-z0-9]|\$)').hasMatch(haystack);
+  }
+
+  String _stripLabel(String line) {
+    var value = line.trim();
+    final match = RegExp(
+      r'^([A-Za-z][A-Za-z .\-]{0,15})\s*[:\-]\s*',
+    ).firstMatch(value);
+    if (match != null) {
+      final label = match.group(1)!.trim().toLowerCase();
+      final isKnownLabel = label.length == 1
+          ? _singleLetterLabels.contains(label)
+          : _labelStrips.contains(label) ||
+                _labelStrips.any(
+                  (known) => known.length > 1 && label.startsWith(known),
+                );
+      if (isKnownLabel) value = value.substring(match.end);
+    }
+    return value.trim();
+  }
+
+  String _cleanEntity(String value) {
+    var cleaned = value.trim().replaceAll(RegExp(r'\s+'), ' ');
+    cleaned = cleaned.replaceAll(RegExp(r'^[.,;:\-]+|[.,;:\-]+$'), '');
+    cleaned = cleaned.replaceAllMapped(
+      RegExp(r'([A-Za-z])\.([A-Z][a-z])'),
+      (match) => '${match[1]}. ${match[2]}',
+    );
+    return cleaned.trim();
+  }
+
+  String _titleCaseWords(String value) {
+    return value
+        .split(RegExp(r'\s+'))
+        .where((word) => word.isNotEmpty)
+        .map((word) => word[0].toUpperCase() + word.substring(1).toLowerCase())
+        .join(' ');
+  }
+}
+);
+    if (words.any((word) =>
+        !nameToken.hasMatch(word) && !initialToken.hasMatch(word))) {
+      return false;
+    }
+
+    final lower = trimmed.toLowerCase();
+
+    // Explicit non-name keywords are never a name.
+    if (_nonNameKeywords.contains(lower)) return false;
+
+    // Designation words are never a name.
+    if (_designationKeywords.any((kw) => _hasKeyword(lower, kw))) {
+      return false;
+    }
+
+    // Company keywords are never a name.
+    if (_companyKeywords.any((kw) => _hasKeyword(lower, kw))) {
+      return false;
+    }
+
+    // Email or URL is never a name.
+    if (_emailPattern.hasMatch(trimmed) || _urlPattern.hasMatch(trimmed)) {
+      return false;
+    }
+
+    return true;
+  }
+
+  String _extractName(
+    List<String> lines,
+    List<String> emails,
+    List<String> websites,
+    List<String> phones,
+    String address,
+    ({String text, int index}) designation,
+    String company,
+  ) {
+    var bestIndex = -1;
+    var bestScore = -100;
+
+    for (var i = 0; i < lines.length; i++) {
+      final candidate = _stripLabel(lines[i]);
+      if (!_isLikelyName(candidate)) continue;
+      if (candidate == designation.text || candidate == company) continue;
+      if (address.isNotEmpty && address.contains(candidate)) continue;
+      if (_looksLikePhoneLine(candidate, phones)) continue;
+
+      var score = 0;
+      final words = candidate
+          .split(RegExp(r'\s+'))
+          .where((w) => w.isNotEmpty)
+          .toList();
+
+      if (words.length >= 2 && words.length <= 4) score += 3;
+      if (candidate == candidate.toUpperCase() &&
+          RegExp(r'[A-Z]').hasMatch(candidate)) {
+        score += 1;
+      }
+
+      final titleCase = words.where((word) => _isCapitalized(word)).length;
+      if (titleCase >= (words.length / 2).ceil()) score += 2;
+      if (i <= 2) score += 2;
+
+      if (designation.index >= 0 &&
+          (i == designation.index - 1 || i == designation.index + 1)) {
+        score += 3;
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = i;
+      }
+    }
+
+    if (bestIndex < 0 || bestScore < 2) return '';
+    return _normalizeName(_stripLabel(lines[bestIndex]));
+  }
+
+  bool _isCapitalized(String word) {
+    if (word.isEmpty) return false;
+    final first = word[0];
+    return first == first.toUpperCase() && first != first.toLowerCase();
+  }
+
+  String _normalizeName(String name) {
+    var value = _cleanEntity(name);
+
+    // Strip courtesy titles that OCR may have glued onto the name.
+    value = value.replaceFirst(
+      RegExp(r'^(Mr|Mrs|Ms|Miss|Dr|Prof|Sir|Madam)\s+', caseSensitive: false),
+      '',
+    );
+
+    if (value.toUpperCase() == value && RegExp(r'[A-Z]').hasMatch(value)) {
+      value = value
+          .split(' ')
+          .map(
+            (word) => word
+                .split('-')
+                .map((part) {
+                  if (part.isEmpty) return part;
+                  return part[0].toUpperCase() +
+                      part.substring(1).toLowerCase();
+                })
+                .join('-'),
+          )
+          .join(' ');
+    }
+    return value;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Shared helpers
+  // ---------------------------------------------------------------------------
+
+  /// Picks the most reliable host for the card, preferring an explicit website.
+  String _canonicalHost(List<String> websites, List<String> emails) {
+    final ordered = <String>[...websites]
+      ..sort((a, b) => _websiteRank(a).compareTo(_websiteRank(b)));
+    for (final site in ordered) {
+      final host = _hostOf(site);
+      if (host.contains('.') && !_looksLikeFile(host)) return host;
+    }
+    for (final email in emails) {
+      final at = email.indexOf('@');
+      if (at < 0) continue;
+      final host = email.substring(at + 1).toLowerCase();
+      if (!host.contains('.')) continue;
+      final root = _rootLabel(host).toLowerCase();
+      if (!_publicEmailDomains.contains(root)) return host;
+    }
+    return '';
+  }
+
+  int _websiteRank(String site) {
+    final lower = site.toLowerCase();
+    if (lower.startsWith('http://') || lower.startsWith('https://')) return 0;
+    if (lower.startsWith('www.')) return 1;
+    return 2;
+  }
+
+  List<String> _reconcileEmails(List<String> emails, String canonicalHost) {
+    if (canonicalHost.isEmpty) return emails;
+    final canonical = canonicalHost.toLowerCase();
+    return emails.map((email) {
+      final at = email.indexOf('@');
+      if (at <= 0) return email;
+      final domain = email.substring(at + 1).toLowerCase();
+      if (domain == canonical) return email;
+      if (!_isNearMissDomain(domain, canonical)) return email;
+      return '${email.substring(0, at)}@$canonical';
+    }).toList();
+  }
+
+  /// True when two domains differ only by a likely OCR substitution in the
+  /// registrable name (e.g. `acrme-tech.com` vs `acrne-tech.com`).
+  bool _isNearMissDomain(String a, String b) {
+    final rootA = _rootLabel(a).toLowerCase();
+    final rootB = _rootLabel(b).toLowerCase();
+    if (rootA == rootB) return false;
+    if (rootA.length < 4 || rootB.length < 4) return false;
+    return _editDistance(rootA, rootB) <= 1;
+  }
+
+  /// Repairs company names that were OCR'd one character away from the domain.
+  String _reconcileCompany(String company, String canonicalHost) {
+    if (company.isEmpty || canonicalHost.isEmpty) return company;
+    final root = _rootLabel(canonicalHost).toLowerCase();
+    final candidates = <String>{
+      root,
+      ...root.split(RegExp(r'[-_]')),
+    }.where((value) => value.length >= 4).toList();
+    if (candidates.isEmpty) return company;
+
+    var changed = false;
+    final repaired = company
+        .split(' ')
+        .map((word) {
+          final cleaned = word.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
+          if (cleaned.length < 4) return word;
+          final lower = cleaned.toLowerCase();
+          for (final candidate in candidates) {
+            if (lower == candidate) return word;
+            if (_editDistance(lower, candidate) <= 1) {
+              changed = true;
+              return word.replaceFirst(
+                RegExp(RegExp.escape(cleaned)),
+                _titleCaseWords(candidate),
+              );
+            }
+          }
+          return word;
+        })
+        .join(' ');
+
+    return changed ? repaired : company;
+  }
+
+  int _editDistance(String a, String b) {
+    final row = List<int>.generate(b.length + 1, (index) => index);
+    for (var i = 1; i <= a.length; i++) {
+      var diagonal = row[0];
+      row[0] = i;
+      for (var j = 1; j <= b.length; j++) {
+        final above = row[j];
+        final cost = a[i - 1] == b[j - 1] ? 0 : 1;
+        final insertion = row[j] + 1;
+        final deletion = row[j - 1] + 1;
+        final substitution = diagonal + cost;
+        row[j] = _min3(insertion, deletion, substitution);
+        diagonal = above;
+      }
+    }
+    return row[b.length];
+  }
+
+  int _min3(int a, int b, int c) {
+    final min = a < b ? a : b;
+    return min < c ? min : c;
+  }
+
+  bool _hasKeyword(String haystack, String keyword) {
+    final escaped = RegExp.escape(keyword);
+    return RegExp('(^|[^a-z0-9])$escaped([^a-z0-9]|\$)').hasMatch(haystack);
+  }
+
+  String _stripLabel(String line) {
+    var value = line.trim();
+    final match = RegExp(
+      r'^([A-Za-z][A-Za-z .\-]{0,15})\s*[:\-]\s*',
+    ).firstMatch(value);
+    if (match != null) {
+      final label = match.group(1)!.trim().toLowerCase();
+      final isKnownLabel = label.length == 1
+          ? _singleLetterLabels.contains(label)
+          : _labelStrips.contains(label) ||
+                _labelStrips.any(
+                  (known) => known.length > 1 && label.startsWith(known),
+                );
+      if (isKnownLabel) value = value.substring(match.end);
+    }
+    return value.trim();
+  }
+
+  String _cleanEntity(String value) {
+    var cleaned = value.trim().replaceAll(RegExp(r'\s+'), ' ');
+    cleaned = cleaned.replaceAll(RegExp(r'^[.,;:\-]+|[.,;:\-]+$'), '');
+    cleaned = cleaned.replaceAllMapped(
+      RegExp(r'([A-Za-z])\.([A-Z][a-z])'),
+      (match) => '${match[1]}. ${match[2]}',
+    );
+    return cleaned.trim();
+  }
+
+  String _titleCaseWords(String value) {
+    return value
+        .split(RegExp(r'\s+'))
+        .where((word) => word.isNotEmpty)
+        .map((word) => word[0].toUpperCase() + word.substring(1).toLowerCase())
+        .join(' ');
+  }
+}
+).hasMatch(word)) {
+              return word.replaceAll('.', '').split('').join('.');
+            }
+            return word
+                .split('-')
+                .map((part) {
+                  if (part.isEmpty) return part;
+                  return part[0].toUpperCase() +
+                      part.substring(1).toLowerCase();
+                })
+                .join('-');
+          })
+          .join(' ');
+    }
+    return value;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Shared helpers
+  // ---------------------------------------------------------------------------
+
+  /// Picks the most reliable host for the card, preferring an explicit website.
+  String _canonicalHost(List<String> websites, List<String> emails) {
+    final ordered = <String>[...websites]
+      ..sort((a, b) => _websiteRank(a).compareTo(_websiteRank(b)));
+    for (final site in ordered) {
+      final host = _hostOf(site);
+      if (host.contains('.') && !_looksLikeFile(host)) return host;
+    }
+    for (final email in emails) {
+      final at = email.indexOf('@');
+      if (at < 0) continue;
+      final host = email.substring(at + 1).toLowerCase();
+      if (!host.contains('.')) continue;
+      final root = _rootLabel(host).toLowerCase();
+      if (!_publicEmailDomains.contains(root)) return host;
+    }
+    return '';
+  }
+
+  int _websiteRank(String site) {
+    final lower = site.toLowerCase();
+    if (lower.startsWith('http://') || lower.startsWith('https://')) return 0;
+    if (lower.startsWith('www.')) return 1;
+    return 2;
+  }
+
+  List<String> _reconcileEmails(List<String> emails, String canonicalHost) {
+    if (canonicalHost.isEmpty) return emails;
+    final canonical = canonicalHost.toLowerCase();
+    return emails.map((email) {
+      final at = email.indexOf('@');
+      if (at <= 0) return email;
+      final domain = email.substring(at + 1).toLowerCase();
+      if (domain == canonical) return email;
+      if (!_isNearMissDomain(domain, canonical)) return email;
+      return '${email.substring(0, at)}@$canonical';
+    }).toList();
+  }
+
+  /// True when two domains differ only by a likely OCR substitution in the
+  /// registrable name (e.g. `acrme-tech.com` vs `acrne-tech.com`).
+  bool _isNearMissDomain(String a, String b) {
+    final rootA = _rootLabel(a).toLowerCase();
+    final rootB = _rootLabel(b).toLowerCase();
+    if (rootA == rootB) return false;
+    if (rootA.length < 4 || rootB.length < 4) return false;
+    return _editDistance(rootA, rootB) <= 1;
+  }
+
+  /// Repairs company names that were OCR'd one character away from the domain.
+  String _reconcileCompany(String company, String canonicalHost) {
+    if (company.isEmpty || canonicalHost.isEmpty) return company;
+    final root = _rootLabel(canonicalHost).toLowerCase();
+    final candidates = <String>{
+      root,
+      ...root.split(RegExp(r'[-_]')),
+    }.where((value) => value.length >= 4).toList();
+    if (candidates.isEmpty) return company;
+
+    var changed = false;
+    final repaired = company
+        .split(' ')
+        .map((word) {
+          final cleaned = word.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
+          if (cleaned.length < 4) return word;
+          final lower = cleaned.toLowerCase();
+          for (final candidate in candidates) {
+            if (lower == candidate) return word;
+            if (_editDistance(lower, candidate) <= 1) {
+              changed = true;
+              return word.replaceFirst(
+                RegExp(RegExp.escape(cleaned)),
+                _titleCaseWords(candidate),
+              );
+            }
+          }
+          return word;
+        })
+        .join(' ');
+
+    return changed ? repaired : company;
+  }
+
+  int _editDistance(String a, String b) {
+    final row = List<int>.generate(b.length + 1, (index) => index);
+    for (var i = 1; i <= a.length; i++) {
+      var diagonal = row[0];
+      row[0] = i;
+      for (var j = 1; j <= b.length; j++) {
+        final above = row[j];
+        final cost = a[i - 1] == b[j - 1] ? 0 : 1;
+        final insertion = row[j] + 1;
+        final deletion = row[j - 1] + 1;
+        final substitution = diagonal + cost;
+        row[j] = _min3(insertion, deletion, substitution);
+        diagonal = above;
+      }
+    }
+    return row[b.length];
+  }
+
+  int _min3(int a, int b, int c) {
+    final min = a < b ? a : b;
+    return min < c ? min : c;
+  }
+
+  bool _hasKeyword(String haystack, String keyword) {
+    final escaped = RegExp.escape(keyword);
+    return RegExp('(^|[^a-z0-9])$escaped([^a-z0-9]|\$)').hasMatch(haystack);
+  }
+
+  String _stripLabel(String line) {
+    var value = line.trim();
+    final match = RegExp(
+      r'^([A-Za-z][A-Za-z .\-]{0,15})\s*[:\-]\s*',
+    ).firstMatch(value);
+    if (match != null) {
+      final label = match.group(1)!.trim().toLowerCase();
+      final isKnownLabel = label.length == 1
+          ? _singleLetterLabels.contains(label)
+          : _labelStrips.contains(label) ||
+                _labelStrips.any(
+                  (known) => known.length > 1 && label.startsWith(known),
+                );
+      if (isKnownLabel) value = value.substring(match.end);
+    }
+    return value.trim();
+  }
+
+  String _cleanEntity(String value) {
+    var cleaned = value.trim().replaceAll(RegExp(r'\s+'), ' ');
+    cleaned = cleaned.replaceAll(RegExp(r'^[.,;:\-]+|[.,;:\-]+$'), '');
+    cleaned = cleaned.replaceAllMapped(
+      RegExp(r'([A-Za-z])\.([A-Z][a-z])'),
+      (match) => '${match[1]}. ${match[2]}',
+    );
+    return cleaned.trim();
+  }
+
+  String _titleCaseWords(String value) {
+    return value
+        .split(RegExp(r'\s+'))
+        .where((word) => word.isNotEmpty)
+        .map((word) => word[0].toUpperCase() + word.substring(1).toLowerCase())
+        .join(' ');
+  }
+}
+);
+    if (words.any((word) =>
+        !nameToken.hasMatch(word) && !initialToken.hasMatch(word))) {
+      return false;
+    }
+
+    final lower = trimmed.toLowerCase();
+
+    // Explicit non-name keywords are never a name.
+    if (_nonNameKeywords.contains(lower)) return false;
+
+    // Designation words are never a name.
+    if (_designationKeywords.any((kw) => _hasKeyword(lower, kw))) {
+      return false;
+    }
+
+    // Company keywords are never a name.
+    if (_companyKeywords.any((kw) => _hasKeyword(lower, kw))) {
+      return false;
+    }
+
+    // Email or URL is never a name.
+    if (_emailPattern.hasMatch(trimmed) || _urlPattern.hasMatch(trimmed)) {
+      return false;
+    }
+
+    return true;
+  }
+
+  String _extractName(
+    List<String> lines,
+    List<String> emails,
+    List<String> websites,
+    List<String> phones,
+    String address,
+    ({String text, int index}) designation,
+    String company,
+  ) {
+    var bestIndex = -1;
+    var bestScore = -100;
+
+    for (var i = 0; i < lines.length; i++) {
+      final candidate = _stripLabel(lines[i]);
+      if (!_isLikelyName(candidate)) continue;
+      if (candidate == designation.text || candidate == company) continue;
+      if (address.isNotEmpty && address.contains(candidate)) continue;
+      if (_looksLikePhoneLine(candidate, phones)) continue;
+
+      var score = 0;
+      final words = candidate
+          .split(RegExp(r'\s+'))
+          .where((w) => w.isNotEmpty)
+          .toList();
+
+      if (words.length >= 2 && words.length <= 4) score += 3;
+      if (candidate == candidate.toUpperCase() &&
+          RegExp(r'[A-Z]').hasMatch(candidate)) {
+        score += 1;
+      }
+
+      final titleCase = words.where((word) => _isCapitalized(word)).length;
+      if (titleCase >= (words.length / 2).ceil()) score += 2;
+      if (i <= 2) score += 2;
+
+      if (designation.index >= 0 &&
+          (i == designation.index - 1 || i == designation.index + 1)) {
+        score += 3;
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = i;
+      }
+    }
+
+    if (bestIndex < 0 || bestScore < 2) return '';
+    return _normalizeName(_stripLabel(lines[bestIndex]));
+  }
+
+  bool _isCapitalized(String word) {
+    if (word.isEmpty) return false;
+    final first = word[0];
+    return first == first.toUpperCase() && first != first.toLowerCase();
+  }
+
+  String _normalizeName(String name) {
+    var value = _cleanEntity(name);
+
+    // Strip courtesy titles that OCR may have glued onto the name.
+    value = value.replaceFirst(
+      RegExp(r'^(Mr|Mrs|Ms|Miss|Dr|Prof|Sir|Madam)\s+', caseSensitive: false),
+      '',
+    );
+
+    if (value.toUpperCase() == value && RegExp(r'[A-Z]').hasMatch(value)) {
+      value = value
+          .split(' ')
+          .map(
+            (word) => word
+                .split('-')
+                .map((part) {
+                  if (part.isEmpty) return part;
+                  return part[0].toUpperCase() +
+                      part.substring(1).toLowerCase();
+                })
+                .join('-'),
+          )
+          .join(' ');
+    }
+    return value;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Shared helpers
+  // ---------------------------------------------------------------------------
+
+  /// Picks the most reliable host for the card, preferring an explicit website.
+  String _canonicalHost(List<String> websites, List<String> emails) {
+    final ordered = <String>[...websites]
+      ..sort((a, b) => _websiteRank(a).compareTo(_websiteRank(b)));
+    for (final site in ordered) {
+      final host = _hostOf(site);
+      if (host.contains('.') && !_looksLikeFile(host)) return host;
+    }
+    for (final email in emails) {
+      final at = email.indexOf('@');
+      if (at < 0) continue;
+      final host = email.substring(at + 1).toLowerCase();
+      if (!host.contains('.')) continue;
+      final root = _rootLabel(host).toLowerCase();
+      if (!_publicEmailDomains.contains(root)) return host;
+    }
+    return '';
+  }
+
+  int _websiteRank(String site) {
+    final lower = site.toLowerCase();
+    if (lower.startsWith('http://') || lower.startsWith('https://')) return 0;
+    if (lower.startsWith('www.')) return 1;
+    return 2;
+  }
+
+  List<String> _reconcileEmails(List<String> emails, String canonicalHost) {
+    if (canonicalHost.isEmpty) return emails;
+    final canonical = canonicalHost.toLowerCase();
+    return emails.map((email) {
+      final at = email.indexOf('@');
+      if (at <= 0) return email;
+      final domain = email.substring(at + 1).toLowerCase();
+      if (domain == canonical) return email;
+      if (!_isNearMissDomain(domain, canonical)) return email;
+      return '${email.substring(0, at)}@$canonical';
+    }).toList();
+  }
+
+  /// True when two domains differ only by a likely OCR substitution in the
+  /// registrable name (e.g. `acrme-tech.com` vs `acrne-tech.com`).
+  bool _isNearMissDomain(String a, String b) {
+    final rootA = _rootLabel(a).toLowerCase();
+    final rootB = _rootLabel(b).toLowerCase();
+    if (rootA == rootB) return false;
+    if (rootA.length < 4 || rootB.length < 4) return false;
+    return _editDistance(rootA, rootB) <= 1;
+  }
+
+  /// Repairs company names that were OCR'd one character away from the domain.
+  String _reconcileCompany(String company, String canonicalHost) {
+    if (company.isEmpty || canonicalHost.isEmpty) return company;
+    final root = _rootLabel(canonicalHost).toLowerCase();
+    final candidates = <String>{
+      root,
+      ...root.split(RegExp(r'[-_]')),
+    }.where((value) => value.length >= 4).toList();
+    if (candidates.isEmpty) return company;
+
+    var changed = false;
+    final repaired = company
+        .split(' ')
+        .map((word) {
+          final cleaned = word.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
+          if (cleaned.length < 4) return word;
+          final lower = cleaned.toLowerCase();
+          for (final candidate in candidates) {
+            if (lower == candidate) return word;
+            if (_editDistance(lower, candidate) <= 1) {
+              changed = true;
+              return word.replaceFirst(
+                RegExp(RegExp.escape(cleaned)),
+                _titleCaseWords(candidate),
+              );
+            }
+          }
+          return word;
+        })
+        .join(' ');
+
+    return changed ? repaired : company;
+  }
+
+  int _editDistance(String a, String b) {
+    final row = List<int>.generate(b.length + 1, (index) => index);
+    for (var i = 1; i <= a.length; i++) {
+      var diagonal = row[0];
+      row[0] = i;
+      for (var j = 1; j <= b.length; j++) {
+        final above = row[j];
+        final cost = a[i - 1] == b[j - 1] ? 0 : 1;
+        final insertion = row[j] + 1;
+        final deletion = row[j - 1] + 1;
+        final substitution = diagonal + cost;
+        row[j] = _min3(insertion, deletion, substitution);
+        diagonal = above;
+      }
+    }
+    return row[b.length];
+  }
+
+  int _min3(int a, int b, int c) {
+    final min = a < b ? a : b;
+    return min < c ? min : c;
+  }
+
+  bool _hasKeyword(String haystack, String keyword) {
+    final escaped = RegExp.escape(keyword);
+    return RegExp('(^|[^a-z0-9])$escaped([^a-z0-9]|\$)').hasMatch(haystack);
+  }
+
+  String _stripLabel(String line) {
+    var value = line.trim();
+    final match = RegExp(
+      r'^([A-Za-z][A-Za-z .\-]{0,15})\s*[:\-]\s*',
+    ).firstMatch(value);
+    if (match != null) {
+      final label = match.group(1)!.trim().toLowerCase();
+      final isKnownLabel = label.length == 1
+          ? _singleLetterLabels.contains(label)
+          : _labelStrips.contains(label) ||
+                _labelStrips.any(
+                  (known) => known.length > 1 && label.startsWith(known),
+                );
+      if (isKnownLabel) value = value.substring(match.end);
+    }
+    return value.trim();
+  }
+
+  String _cleanEntity(String value) {
+    var cleaned = value.trim().replaceAll(RegExp(r'\s+'), ' ');
+    cleaned = cleaned.replaceAll(RegExp(r'^[.,;:\-]+|[.,;:\-]+$'), '');
+    cleaned = cleaned.replaceAllMapped(
+      RegExp(r'([A-Za-z])\.([A-Z][a-z])'),
+      (match) => '${match[1]}. ${match[2]}',
+    );
+    return cleaned.trim();
+  }
+
+  String _titleCaseWords(String value) {
+    return value
+        .split(RegExp(r'\s+'))
+        .where((word) => word.isNotEmpty)
+        .map((word) => word[0].toUpperCase() + word.substring(1).toLowerCase())
+        .join(' ');
+  }
+}
+).hasMatch(word))) {
+        score += 2;
+      }
+      if (_companyKeywords.any((kw) => _hasKeyword(candidate.toLowerCase(), kw))) {
+        score -= 3;
+      }
+      if (candidate == candidate.toUpperCase() &&
+          RegExp(r'[A-Z]').hasMatch(candidate)) {
+        score += 1;
+      }
+
+      final titleCase = words.where((word) => _isCapitalized(word)).length;
+      if (titleCase >= (words.length / 2).ceil()) score += 2;
+      if (i <= 2) score += 2;
+
+      if (designation.index >= 0 &&
+          (i == designation.index - 1 || i == designation.index + 1)) {
+        score += 3;
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = i;
+      }
+    }
+
+    if (bestIndex < 0 || bestScore < 2) return '';
+    return _normalizeName(_stripLabel(lines[bestIndex]));
+  }
+
+  bool _isCapitalized(String word) {
+    if (word.isEmpty) return false;
+    final first = word[0];
+    return first == first.toUpperCase() && first != first.toLowerCase();
+  }
+
+  String _normalizeName(String name) {
+    var value = _cleanEntity(name);
+
+    // Strip courtesy titles that OCR may have glued onto the name.
+    value = value.replaceFirst(
+      RegExp(r'^(Mr|Mrs|Ms|Miss|Dr|Prof|Sir|Madam)\s+', caseSensitive: false),
+      '',
+    );
+
+    if (value.toUpperCase() == value && RegExp(r'[A-Z]').hasMatch(value)) {
+      value = value
+          .split(' ')
+          .map(
+            (word) => word
+                .split('-')
+                .map((part) {
+                  if (part.isEmpty) return part;
+                  return part[0].toUpperCase() +
+                      part.substring(1).toLowerCase();
+                })
+                .join('-'),
+          )
+          .join(' ');
+    }
+    return value;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Shared helpers
+  // ---------------------------------------------------------------------------
+
+  /// Picks the most reliable host for the card, preferring an explicit website.
+  String _canonicalHost(List<String> websites, List<String> emails) {
+    final ordered = <String>[...websites]
+      ..sort((a, b) => _websiteRank(a).compareTo(_websiteRank(b)));
+    for (final site in ordered) {
+      final host = _hostOf(site);
+      if (host.contains('.') && !_looksLikeFile(host)) return host;
+    }
+    for (final email in emails) {
+      final at = email.indexOf('@');
+      if (at < 0) continue;
+      final host = email.substring(at + 1).toLowerCase();
+      if (!host.contains('.')) continue;
+      final root = _rootLabel(host).toLowerCase();
+      if (!_publicEmailDomains.contains(root)) return host;
+    }
+    return '';
+  }
+
+  int _websiteRank(String site) {
+    final lower = site.toLowerCase();
+    if (lower.startsWith('http://') || lower.startsWith('https://')) return 0;
+    if (lower.startsWith('www.')) return 1;
+    return 2;
+  }
+
+  List<String> _reconcileEmails(List<String> emails, String canonicalHost) {
+    if (canonicalHost.isEmpty) return emails;
+    final canonical = canonicalHost.toLowerCase();
+    return emails.map((email) {
+      final at = email.indexOf('@');
+      if (at <= 0) return email;
+      final domain = email.substring(at + 1).toLowerCase();
+      if (domain == canonical) return email;
+      if (!_isNearMissDomain(domain, canonical)) return email;
+      return '${email.substring(0, at)}@$canonical';
+    }).toList();
+  }
+
+  /// True when two domains differ only by a likely OCR substitution in the
+  /// registrable name (e.g. `acrme-tech.com` vs `acrne-tech.com`).
+  bool _isNearMissDomain(String a, String b) {
+    final rootA = _rootLabel(a).toLowerCase();
+    final rootB = _rootLabel(b).toLowerCase();
+    if (rootA == rootB) return false;
+    if (rootA.length < 4 || rootB.length < 4) return false;
+    return _editDistance(rootA, rootB) <= 1;
+  }
+
+  /// Repairs company names that were OCR'd one character away from the domain.
+  String _reconcileCompany(String company, String canonicalHost) {
+    if (company.isEmpty || canonicalHost.isEmpty) return company;
+    final root = _rootLabel(canonicalHost).toLowerCase();
+    final candidates = <String>{
+      root,
+      ...root.split(RegExp(r'[-_]')),
+    }.where((value) => value.length >= 4).toList();
+    if (candidates.isEmpty) return company;
+
+    var changed = false;
+    final repaired = company
+        .split(' ')
+        .map((word) {
+          final cleaned = word.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
+          if (cleaned.length < 4) return word;
+          final lower = cleaned.toLowerCase();
+          for (final candidate in candidates) {
+            if (lower == candidate) return word;
+            if (_editDistance(lower, candidate) <= 1) {
+              changed = true;
+              return word.replaceFirst(
+                RegExp(RegExp.escape(cleaned)),
+                _titleCaseWords(candidate),
+              );
+            }
+          }
+          return word;
+        })
+        .join(' ');
+
+    return changed ? repaired : company;
+  }
+
+  int _editDistance(String a, String b) {
+    final row = List<int>.generate(b.length + 1, (index) => index);
+    for (var i = 1; i <= a.length; i++) {
+      var diagonal = row[0];
+      row[0] = i;
+      for (var j = 1; j <= b.length; j++) {
+        final above = row[j];
+        final cost = a[i - 1] == b[j - 1] ? 0 : 1;
+        final insertion = row[j] + 1;
+        final deletion = row[j - 1] + 1;
+        final substitution = diagonal + cost;
+        row[j] = _min3(insertion, deletion, substitution);
+        diagonal = above;
+      }
+    }
+    return row[b.length];
+  }
+
+  int _min3(int a, int b, int c) {
+    final min = a < b ? a : b;
+    return min < c ? min : c;
+  }
+
+  bool _hasKeyword(String haystack, String keyword) {
+    final escaped = RegExp.escape(keyword);
+    return RegExp('(^|[^a-z0-9])$escaped([^a-z0-9]|\$)').hasMatch(haystack);
+  }
+
+  String _stripLabel(String line) {
+    var value = line.trim();
+    final match = RegExp(
+      r'^([A-Za-z][A-Za-z .\-]{0,15})\s*[:\-]\s*',
+    ).firstMatch(value);
+    if (match != null) {
+      final label = match.group(1)!.trim().toLowerCase();
+      final isKnownLabel = label.length == 1
+          ? _singleLetterLabels.contains(label)
+          : _labelStrips.contains(label) ||
+                _labelStrips.any(
+                  (known) => known.length > 1 && label.startsWith(known),
+                );
+      if (isKnownLabel) value = value.substring(match.end);
+    }
+    return value.trim();
+  }
+
+  String _cleanEntity(String value) {
+    var cleaned = value.trim().replaceAll(RegExp(r'\s+'), ' ');
+    cleaned = cleaned.replaceAll(RegExp(r'^[.,;:\-]+|[.,;:\-]+$'), '');
+    cleaned = cleaned.replaceAllMapped(
+      RegExp(r'([A-Za-z])\.([A-Z][a-z])'),
+      (match) => '${match[1]}. ${match[2]}',
+    );
+    return cleaned.trim();
+  }
+
+  String _titleCaseWords(String value) {
+    return value
+        .split(RegExp(r'\s+'))
+        .where((word) => word.isNotEmpty)
+        .map((word) => word[0].toUpperCase() + word.substring(1).toLowerCase())
+        .join(' ');
+  }
+}
+);
+    if (words.any((word) =>
+        !nameToken.hasMatch(word) && !initialToken.hasMatch(word))) {
+      return false;
+    }
 
     final lower = trimmed.toLowerCase();
 
