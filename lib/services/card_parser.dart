@@ -917,10 +917,9 @@ class CardParser {
           score += keyword.contains(' ') || keyword.contains('.') ? 3 : 2;
         }
       }
-      if (_companyKeywords.any((keyword) => _hasKeyword(lower, keyword))) {
-        score -= 1;
-      }
-
+      // Do not penalize a role line merely because it also contains an
+      // organizational descriptor (e.g. "Water Solutions Engineer").
+      // Strong role vocabulary should remain decisive.
       if (score > bestScore) {
         bestScore = score;
         best = candidate;
