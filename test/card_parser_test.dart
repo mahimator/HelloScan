@@ -164,8 +164,8 @@ Plot 12 Bukoto Street, Kamwokya, Kampala''');
 
     test('preserves multiple contacts when parsing both sides', () {
       final result = parser.parseMany([
-        'Joshua Kanyesigye, PMP\\nFounder & CEO\\n+256 793 661 811\\nj.kanyesigye@cmgminerals.com\\nwww.cmgminerals.com',
-        'Tel: +256 793 193 951\\nMineral Project Development\\nPlot 1, Kampala',
+        'Joshua Kanyesigye, PMP\nFounder & CEO\n+256 793 661 811\nj.kanyesigye@cmgminerals.com\nwww.cmgminerals.com',
+        'Tel: +256 793 193 951\nMineral Project Development\nPlot 1, Kampala',
       ]);
 
       expect(result.name, contains('Joshua Kanyesigye'));
@@ -192,10 +192,10 @@ P.O. Box 128039, Kampala, Uganda''');
 
     test('parses structured OCR blocks while preserving line grouping', () {
       final document = OcrDocument(
-        text: 'MAYA PATEL\\nOperations Director\\nNorthstar Utilities',
+        text: 'MAYA PATEL\nOperations Director\nNorthstar Utilities',
         blocks: [
           OcrBlock(
-            text: 'MAYA PATEL\\nOperations Director\\nNorthstar Utilities',
+            text: 'MAYA PATEL\nOperations Director\nNorthstar Utilities',
             lines: [
               OcrLine(text: 'MAYA PATEL', left: 30, top: 20, right: 240, bottom: 55),
               OcrLine(text: 'Operations Director', left: 30, top: 70, right: 260, bottom: 105),
