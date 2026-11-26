@@ -13,7 +13,6 @@ class MlKitOcrService implements OcrService {
   MlKitOcrService();
 
   TextRecognizer? _recognizer;
-  Future<void>? _prewarmFuture;
 
   TextRecognizer get _engine =>
       _recognizer ??= TextRecognizer(script: TextRecognitionScript.latin);
