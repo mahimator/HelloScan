@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../models/ocr_document.dart';
 import '../models/parsed_card.dart';
 import '../models/scan_card.dart';
 import '../services/batch_export.dart';
