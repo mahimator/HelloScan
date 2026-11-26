@@ -34,8 +34,8 @@ class ImageEnhancer {
       final scale = maxDimension / longest;
       image = img.copyResize(
         image,
-        width: math.max(1, (image.width * scale).round()),
-        height: math.max(1, (image.height * scale).round()),
+        width: math.max(1, (image.width * scale).round()).toInt(),
+        height: math.max(1, (image.height * scale).round()).toInt(),
         interpolation: img.Interpolation.linear,
       );
     } else if (!fast && image.width < targetWidth) {
@@ -46,8 +46,8 @@ class ImageEnhancer {
       if (scale > 1.05) {
         image = img.copyResize(
           image,
-          width: math.max(1, (image.width * scale).round()),
-          height: math.max(1, (image.height * scale).round()),
+          width: math.max(1, (image.width * scale).round()).toInt(),
+          height: math.max(1, (image.height * scale).round()).toInt(),
           interpolation: img.Interpolation.linear,
         );
       }
