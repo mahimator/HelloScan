@@ -11,14 +11,15 @@ HelloScan is an Android-first Flutter app for capturing visiting cards into a te
   - apply EXIF orientation so sideways photos are upright
   - convert to grayscale
   - stretch contrast and lift shadows
-  - upscale low-resolution photos (with a safe cap)
+  - upscale low-resolution photos (with a conservative cap for entry-level devices)
+  - cap oversized camera/gallery images before OCR to limit peak memory use
 - Extract structured fields from noisy OCR text:
   - name, designation, company, email, phone, website and address
   - repair `O`/`0`, `l`/`1` and `S`/`5` confusions inside phone numbers
   - repair spaced emails (`john . doe @ acme . com`)
   - repair near-miss email domains using the card's website (`acrme-tech.com` → `acrne-tech.com`)
   - merge front/back scans and de-duplicate emails and phones
-  - synthesise a company name from the email/website domain when no company line exists
+  - use explicit company text and domain correspondence as supporting evidence without inventing a company name
 - Review-first editing: OCR fills fields, but never overwrites a field you have typed into.
 - Paste raw text as a fallback for unreadable photos or external OCR.
 - Export the batch as `helloscan.contact-batch.v1` JSON and clear it with confirmation.
