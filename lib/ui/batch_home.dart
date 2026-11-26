@@ -361,7 +361,9 @@ class _BatchHomeState extends State<BatchHome> {
         ));
       }
 
-      final parsed = const CardParser().parseManyDocuments(documents);
+      final parsed = await SemanticCardRefiner.instance.refine(
+        const CardParser().parseManyDocuments(documents),
+      );
       if (!mounted) return;
 
       setState(() {
