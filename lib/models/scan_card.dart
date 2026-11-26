@@ -14,6 +14,8 @@ class ScanCard {
     this.company = '',
     this.email = '',
     this.phone = '',
+    this.emails = const <String>[],
+    this.phones = const <String>[],
     this.website = '',
     this.address = '',
     this.notes = '',
@@ -36,6 +38,8 @@ class ScanCard {
   String company;
   String email;
   String phone;
+  List<String> emails;
+  List<String> phones;
   String website;
   String address;
   String notes;
@@ -64,15 +68,23 @@ class ScanCard {
     return trimmed.isEmpty ? null : trimmed;
   }
 
-  List<String> _nonEmptyList(String value) {
-    final trimmed = value.trim();
-    return trimmed.isEmpty ? <String>[] : <String>[trimmed];
+  List<String> _contactValues(List<String> values, String primary) {
+    final candidates = values.isEmpty ? <String>[primary] : values;
+    final result = <String>[];
+    for (final value in candidates) {
+      final trimmed = value.trim();
+      if (trimmed.isNotEmpty && !result.contains(trimmed)) result.add(trimmed);
+    }
+    return result;
   }
 
   Map<String, dynamic> toJson() => {
     'person': {'name': _nonEmpty(name), 'designation': _nonEmpty(title)},
     'organization': {'name': _nonEmpty(company), 'website': _nonEmpty(website)},
-    'contact': {'emails': _nonEmptyList(email), 'phones': _nonEmptyList(phone)},
+    'contact': {
+      'emails': _contactValues(emails, email),
+      'phones': _contactValues(phones, phone),
+    },
     'location': {'full_address': _nonEmpty(address)},
     'notes': _nonEmpty(notes),
     'source': {
