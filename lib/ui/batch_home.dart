@@ -6,10 +6,12 @@ import 'package:file_picker/file_picker.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../models/ocr_document.dart';
 import '../models/parsed_card.dart';
 import '../models/scan_card.dart';
 import '../services/batch_export.dart';
 import '../services/card_parser.dart';
+import '../services/semantic_card_refiner.dart';
 import '../services/mlkit_ocr_service.dart';
 import '../services/ocr_service.dart';
 
@@ -283,21 +285,23 @@ class _BatchHomeState extends State<BatchHome> {
     for (final card in unprocessed) {
       if (!mounted) break;
       try {
-        final texts = <String>[];
+        final documents = <OcrDocument>[];
         if (card.front != null) {
-          texts.add(await _ocrService.recognize(
+          documents.add(await _ocrService.recognizeDocument(
             File(card.front!.path),
             fast: card.fastScan,
           ));
         }
         if (card.back != null) {
-          texts.add(await _ocrService.recognize(
+          documents.add(await _ocrService.recognizeDocument(
             File(card.back!.path),
             fast: card.fastScan,
           ));
         }
 
-        final parsed = const CardParser().parseMany(texts);
+        final parsed = await SemanticCardRefiner.instance.refine(
+          const CardParser().parseManyDocuments(documents),
+        );
         if (!mounted) break;
 
         setState(() {
@@ -343,21 +347,21 @@ class _BatchHomeState extends State<BatchHome> {
     });
 
     try {
-      final texts = <String>[];
+      final documents = <OcrDocument>[];
       if (card.front != null) {
-        texts.add(await _ocrService.recognize(
+        documents.add(await _ocrService.recognizeDocument(
           File(card.front!.path),
           fast: card.fastScan,
         ));
       }
       if (card.back != null) {
-        texts.add(await _ocrService.recognize(
+        documents.add(await _ocrService.recognizeDocument(
           File(card.back!.path),
           fast: card.fastScan,
         ));
       }
 
-      final parsed = const CardParser().parseMany(texts);
+      final parsed = const CardParser().parseManyDocuments(documents);
       if (!mounted) return;
 
       setState(() {
@@ -457,7 +461,9 @@ class _BatchHomeState extends State<BatchHome> {
     );
     if (!mounted || text == null || text.trim().isEmpty) return;
 
-    final parsed = const CardParser().parse(text);
+    final parsed = await SemanticCardRefiner.instance.refine(
+      const CardParser().parse(text),
+    );
     final card = ScanCard(
       id: 'card-${++_counter}',
       fastScan: _fastScan,
