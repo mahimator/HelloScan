@@ -10,6 +10,8 @@ void main() {
         name: ' Ada ',
         company: ' Engines ',
         email: 'ada@example.com',
+        emails: <String>['ada@example.com', 'ada.work@example.com'],
+        phones: <String>['+14155550100', '+14155550101'],
       );
 
       final payload = const BatchExport().buildPayload(<ScanCard>[
@@ -25,7 +27,8 @@ void main() {
       final contact = contacts.single as Map<String, dynamic>;
       expect(contact['person']['name'], 'Ada');
       expect(contact['organization']['name'], 'Engines');
-      expect(contact['contact']['emails'], <String>['ada@example.com']);
+      expect(contact['contact']['emails'], <String>['ada@example.com', 'ada.work@example.com']);
+      expect(contact['contact']['phones'], <String>['+14155550100', '+14155550101']);
       expect(contact['source']['review_status'], 'pending');
     });
 
