@@ -172,7 +172,7 @@ www.cmgminerals.com''';
 
       final result = parser.parse(ocr);
 
-      expect(result.name, 'Joshua Kanyesigye, PMP');
+      expect(result.name, 'Joshua Kanyesigye, Pmp');
       expect(result.company, 'CMG MINERALS');
       expect(result.phones.length, 2);
       expect(result.emails, contains('j.kanyesigye@cmgminerals.com'));
