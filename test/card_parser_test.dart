@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:helloscan/models/ocr_document.dart';
 import 'package:helloscan/services/card_parser.dart';
 
 void main() {
@@ -187,6 +188,27 @@ P.O. Box 128039, Kampala, Uganda''');
       expect(result.company.toLowerCase(), contains('equator'));
       expect(result.phones, hasLength(2));
       expect(result.emails, contains('info@chocolate.ug'));
+    });
+
+    test('parses structured OCR blocks while preserving line grouping', () {
+      final document = OcrDocument(
+        text: 'MAYA PATEL\\nOperations Director\\nNorthstar Utilities',
+        blocks: [
+          OcrBlock(
+            text: 'MAYA PATEL\\nOperations Director\\nNorthstar Utilities',
+            lines: [
+              OcrLine(text: 'MAYA PATEL', left: 30, top: 20, right: 240, bottom: 55),
+              OcrLine(text: 'Operations Director', left: 30, top: 70, right: 260, bottom: 105),
+              OcrLine(text: 'Northstar Utilities', left: 30, top: 125, right: 280, bottom: 160),
+            ],
+          ),
+        ],
+      );
+
+      final result = parser.parseManyDocuments([document]);
+      expect(result.name, 'Maya Patel');
+      expect(result.designation, contains('Director'));
+      expect(result.company, contains('Northstar'));
     });
 
     test('never throws on empty or garbage input', () {
