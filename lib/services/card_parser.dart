@@ -983,8 +983,33 @@ class CardParser {
     var best = '';
     var bestScore = -1000;
 
+    // Some printed logos are split into a brand word and an industry label
+    // (for example "samanga" on one line and "UTILITIES" below it). Evaluate
+    // adjacent pairs only when one line has a company marker and neither is
+    // a person/title/contact candidate.
+    final candidates = <({String text, int index})>[];
     for (var i = 0; i < lines.length; i++) {
-      final candidate = _stripLabel(lines[i]);
+      candidates.add((text: lines[i], index: i));
+      if (i + 1 >= lines.length) continue;
+      final first = lines[i].trim();
+      final second = lines[i + 1].trim();
+      final firstLower = first.toLowerCase();
+      final secondLower = second.toLowerCase();
+      final firstMarked = _companyKeywords.any((kw) => _hasKeyword(firstLower, kw));
+      final secondMarked = _companyKeywords.any((kw) => _hasKeyword(secondLower, kw));
+      final firstIsTitle = _designationKeywords.any((kw) => _hasKeyword(firstLower, kw));
+      final secondIsTitle = _designationKeywords.any((kw) => _hasKeyword(secondLower, kw));
+      if ((firstMarked || secondMarked) && !firstIsTitle && !secondIsTitle &&
+          first.length <= 35 && second.length <= 35 &&
+          !_emailPattern.hasMatch(first) && !_emailPattern.hasMatch(second) &&
+          !_urlPattern.hasMatch(first) && !_urlPattern.hasMatch(second)) {
+        candidates.add((text: '$first $second', index: i));
+      }
+    }
+
+    for (final item in candidates) {
+      final i = item.index;
+      final candidate = _stripLabel(item.text);
       if (candidate.isEmpty || candidate.length > 80) continue;
       if (_emailPattern.hasMatch(candidate)) continue;
       // A bare URL/domain with no spaces is a website, not a company name.
