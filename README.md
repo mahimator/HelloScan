@@ -68,7 +68,7 @@ flutter run
 The Android project is checked in under `android/` and builds with:
 
 - Gradle 9.6.0
-- Android Gradle Plugin 9.1.1
+- Android Gradle Plugin 9.3.1
 - `compileSdk` from the Flutter toolchain (36)
 - `minSdk` 21
 
