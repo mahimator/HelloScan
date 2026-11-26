@@ -91,11 +91,8 @@ class _BatchHomeState extends State<BatchHome> {
     // for ~30s while the recognition model downloads.
     _ocrService.prewarm().catchError((_) {});
 
-    // Kick off Neural Semantic Engine preload in the background if enabled.
-    if (_neuralEngineEnabled && !onboarded) {
-      SemanticCardRefiner.instance.preloadModel().catchError((_) {});
-    }
-
+    // Do not preload the native LLM beside ML Kit. It loads on demand after
+    // OCR, or when the user explicitly taps Download in engine settings.
     // Show onboarding on first launch.
     if (!onboarded && mounted) {
       await Future.delayed(const Duration(milliseconds: 500));
@@ -480,7 +477,7 @@ class _BatchHomeState extends State<BatchHome> {
                   title: const Text('Enable Neural Semantic Layer'),
                   subtitle: const Text(
                     'When on, ambiguous names/companies are resolved using '
-                    'on-device AI. When off, rule-based parsing is used only.',
+                    'on-device AI. The model loads only when needed.',
                   ),
                   value: refiner.isEnabled,
                   onChanged: (value) async {
@@ -488,9 +485,6 @@ class _BatchHomeState extends State<BatchHome> {
                     setDialogState(() {
                       _neuralEngineEnabled = value;
                     });
-                    if (value && !refiner.isLoaded) {
-                      refiner.preloadModel().catchError((_) {});
-                    }
                     setState(() {});
                   },
                   activeThumbColor: _kPrimary,
