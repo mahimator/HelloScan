@@ -49,7 +49,7 @@ class SemanticCardRefiner {
     // Avoid spending inference time when the rule-based parser has a clear,
     // corroborated company and a plausible person name.
     final needsReview = parsed.company.isEmpty ||
-        parsed.company.trim().split(RegExp(r'\\s+')).length == 1 ||
+        parsed.company.trim().split(RegExp(r'\s+')).length == 1 ||
         parsed.name.isEmpty ||
         _looksLikeSloganOrInstruction(parsed.name) ||
         _looksLikeSloganOrInstruction(parsed.company);
@@ -71,8 +71,9 @@ text appears in the OCR lines. A slogan, instruction, job title, address, websit
 email, or QR prompt is not a person's name or company. A brand can be a company
 without a legal suffix. If uncertain, return null for that field.
 
-Return ONLY one JSON object:
-{"person_name": string|null, "company": string|null, "confidence": number}
+Return ONLY one JSON object, for example:
+{"person_name":"Jane Doe","company":"Acme Foods","confidence":0.9}
+Use JSON null when a field cannot be identified.
 
 OCR lines:
 ${jsonEncode(lines)}
