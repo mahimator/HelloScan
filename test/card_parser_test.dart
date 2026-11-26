@@ -92,6 +92,21 @@ john . doe @ example . com''');
       }
     });
 
+    test('retains every email and phone candidate', () {
+      final result = parser.parse('''
+Madhav Trivedi
+madhav@example.com
+m.trivedi@company.org
++256 700 123456
++256 772 654321
+Company Solutions''');
+
+      expect(result.emails, <String>['madhav@example.com', 'm.trivedi@company.org']);
+      expect(result.phones, <String>['+256700123456', '+256772654321']);
+      expect(result.email, result.emails.first);
+      expect(result.phone, result.phones.first);
+    });
+
     test('does not extract email domain as company when no company line exists', () {
       final result = parser.parse('''
 Asha Rao
