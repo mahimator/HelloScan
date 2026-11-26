@@ -49,7 +49,7 @@ class SemanticCardRefiner {
     // Avoid spending inference time when the rule-based parser has a clear,
     // corroborated company and a plausible person name.
     final needsReview = parsed.company.isEmpty ||
-        parsed.company.trim().split(RegExp(r'\\s+')).length == 1 ||
+        parsed.company.trim().split(RegExp(r'\s+')).length == 1 ||
         parsed.name.isEmpty ||
         _looksLikeSloganOrInstruction(parsed.name) ||
         _looksLikeSloganOrInstruction(parsed.company);
@@ -58,7 +58,7 @@ class SemanticCardRefiner {
     try {
       final engine = await _getEngine();
       final lines = raw
-          .split(RegExp(r'[\\r\\n]+'))
+          .split(RegExp(r'[\r\n]+'))
           .map((line) => line.trim())
           .where((line) => line.isNotEmpty)
           .take(35)
@@ -163,8 +163,8 @@ ${jsonEncode(lines)}
 
   bool _looksLikeSloganOrInstruction(String value) {
     return RegExp(
-      r'\\b(scan|visit|follow|unlocking|building|delivering|'
-      r'potential|lasting|value|welcome|contact|call|email)\\b',
+      r'\b(scan|visit|follow|unlocking|building|delivering|'
+      r'potential|lasting|value|welcome|contact|call|email)\b',
       caseSensitive: false,
     ).hasMatch(value);
   }
