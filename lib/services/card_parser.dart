@@ -901,9 +901,8 @@ class CardParser {
           score += keyword.contains(' ') || keyword.contains('.') ? 3 : 2;
         }
       }
-      if (_companyKeywords.any((keyword) => _hasKeyword(lower, keyword))) {
-        score -= 1;
-      }
+      // Do not penalize titles such as 'Water Solutions Engineer':
+      // company-like vocabulary can also be part of a job title.
 
       if (score > bestScore) {
         bestScore = score;
@@ -1053,7 +1052,20 @@ class CardParser {
       RegExp(r'[^a-z0-9]'),
       '',
     );
-    return normalRoot.length >= 3 && normalCandidate.contains(normalRoot);
+    if (normalRoot.length < 3) return false;
+    if (normalCandidate.contains(normalRoot) ||
+        normalRoot.contains(normalCandidate)) {
+      return true;
+    }
+
+    // Some brands use a different suffix in their website than on the card,
+    // e.g. 'Samanga Utilities' and samangasolutions.com. Match a distinctive
+    // shared token without deriving a company name from the domain.
+    final tokens = candidate
+        .toLowerCase()
+        .split(RegExp(r'[^a-z0-9]+'))
+        .where((token) => token.length >= 4);
+    return tokens.any(normalRoot.contains);
   }
 
   // ---------------------------------------------------------------------------
