@@ -11,14 +11,15 @@ HelloScan is an Android-first Flutter app for capturing visiting cards into a te
   - apply EXIF orientation so sideways photos are upright
   - convert to grayscale
   - stretch contrast and lift shadows
-  - upscale low-resolution photos (with a safe cap)
+  - cap oversized camera/gallery images at capture time and again before OCR
+  - upscale only genuinely small photos within a bounded pixel budget
 - Extract structured fields from noisy OCR text:
   - name, designation, company, email, phone, website and address
   - repair `O`/`0`, `l`/`1` and `S`/`5` confusions inside phone numbers
   - repair spaced emails (`john . doe @ acme . com`)
   - repair near-miss email domains using the card's website (`acrme-tech.com` → `acrne-tech.com`)
-  - merge front/back scans and de-duplicate emails and phones
-  - synthesise a company name from the email/website domain when no company line exists
+  - merge front/back scans and preserve every detected email and phone
+  - use email/website domains only as evidence for an explicitly printed company name, never invent a company name from a domain
 - Review-first editing: OCR fills fields, but never overwrites a field you have typed into.
 - Paste raw text as a fallback for unreadable photos or external OCR.
 - Export the batch as `helloscan.contact-batch.v1` JSON and clear it with confirmation.
@@ -37,9 +38,10 @@ The recognizer currently uses ML Kit's Latin script. Other scripts can be enable
 | --- | --- |
 | `lib/models/scan_card.dart` | Staged card + JSON mapping |
 | `lib/models/parsed_card.dart` | Extraction result and merge logic |
+| `lib/models/ocr_document.dart` | OCR blocks, lines and image-space bounding boxes |
 | `lib/services/card_parser.dart` | Pure-Dart OCR text → fields parser |
 | `lib/services/image_enhancer.dart` | Pre-OCR image enhancement |
-| `lib/services/ocr_service.dart` | OCR abstraction (injectable for tests) |
+| `lib/services/ocr_service.dart` | Backwards-compatible plain-text and structured OCR abstraction |
 | `lib/services/mlkit_ocr_service.dart` | On-device ML Kit implementation |
 | `lib/services/batch_export.dart` | Schema payload builder |
 | `lib/ui/batch_home.dart` | Capture, review, export UI |
@@ -104,7 +106,7 @@ The batch export uses `helloscan.contact-batch.v1`. Contact fields are editable 
 
 ## CI
 
-GitHub Actions runs Flutter analysis, unit/widget tests and a debug APK build on pushes and pull requests. A successful build uploads an APK artifact. Integration tests require a physical device or emulator with Google Play services and run locally/nightly.
+GitHub Actions runs Flutter analysis, unit/widget tests and a debug APK build on pushes and pull requests. A successful build uploads a debug APK artifact. Integration tests require an Android device or emulator with Google Play services and run locally.
 
 ## Release / Play Store readiness
 
