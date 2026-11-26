@@ -15,8 +15,8 @@ void main() {
       final decoded = img.decodeImage(output);
 
       expect(decoded, isNotNull);
-      // 40px * maxUpscale(3) = 120px.
-      expect(decoded!.width, 120);
+      // 40px * maxUpscale(2) = 80px.
+      expect(decoded!.width, 80);
     });
 
     test('leaves already-large images at their size', () {
