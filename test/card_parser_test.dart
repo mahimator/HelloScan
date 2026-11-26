@@ -211,6 +211,80 @@ P.O. Box 128039, Kampala, Uganda''');
       expect(result.company, contains('Northstar'));
     });
 
+    test('recognizes common legal company suffix variants', () {
+      final cases = <String, String>{
+        'Acme Pvt. Ltd.': 'Acme Pvt. Ltd.',
+        'Northstar Private Limited': 'Northstar Private Limited',
+        'Blue River LLC': 'Blue River LLC',
+        'Orbit Technologies Inc.': 'Orbit Technologies Inc.',
+        'Canaan Minerals Global Ltd': 'Canaan Minerals Global Ltd',
+        'Mango Trading Co.': 'Mango Trading Co.',
+        'Apex Engineering PLC': 'Apex Engineering PLC',
+      };
+
+      for (final entry in cases.entries) {
+        final result = parser.parse('''
+Jane Doe
+\${entry.key}
+Chief Executive Officer
+jane@example.org
++256 700 123 456''');
+        expect(
+          result.company.toLowerCase(),
+          entry.value.toLowerCase(),
+          reason: 'Failed to recognize \${entry.key}',
+        );
+      }
+    });
+
+    test('recognizes split company wordmarks and domain corroboration', () {
+      final heifer = parser.parse('''
+WILLIAM MATOVU
+Country Director
+HEIFER
+INTERNATIONAL
+William.Matovu@heifer.org
+www.heifer.org''');
+
+      expect(heifer.company.toLowerCase(), 'heifer international');
+
+      final cmg = parser.parse('''
+JOSHUA KANYESIGYE
+Founder & CEO
+CMG
+MINERALS
+j.kanyesigye@cmgminerals.com
+www.cmgminerals.com''');
+
+      expect(cmg.company.toLowerCase(), 'cmg minerals');
+    });
+
+    test('does not promote slogans or long descriptive copy to company', () {
+      final result = parser.parse('''
+Joshua Kanyesigye
+Founder & CEO
+Mineral Project Development Investment Readiness
+Unlocking Mineral Potential. Building Lasting Value.
+j.kanyesigye@cmgminerals.com
+www.cmgminerals.com''');
+
+      expect(result.company, isEmpty);
+      expect(result.name, 'Joshua Kanyesigye');
+      expect(result.designation, contains('Founder'));
+    });
+
+    test('leaves an unmarked single-word brand for manual review', () {
+      final result = parser.parse('''
+Jane Doe
+Founder
+NiggaballsGigaChad
+jane@example.org
++256 700 123 456''');
+
+      expect(result.name, 'Jane Doe');
+      expect(result.company, isEmpty);
+    });
+
     test('never throws on empty or garbage input', () {
       expect(parser.parse('').isEmpty, isTrue);
       expect(parser.parse('   \n\n  ').isEmpty, isTrue);
