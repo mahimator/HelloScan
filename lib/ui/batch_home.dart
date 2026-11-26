@@ -53,7 +53,7 @@ class _BatchHomeState extends State<BatchHome> {
 
   _ScanMode _mode = _ScanMode.single;
 
-  /// When true, skips image enhancement for faster (lower-quality) OCR.
+  /// When true, uses the lighter preprocessing profile for faster OCR.
   bool _fastScan = false;
 
   /// Lock so only one OCR extraction runs at a time. Prevents the batch from
@@ -587,7 +587,7 @@ class _BatchHomeState extends State<BatchHome> {
               ),
             ],
           ),
-          // Fast scan toggle: skips image enhancement for speed.
+          // Fast scan toggle: uses lighter contrast processing for speed.
           Switch(
             value: _fastScan,
             onChanged: (value) => setState(() => _fastScan = value),
