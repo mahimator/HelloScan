@@ -105,7 +105,9 @@ class _BatchHomeState extends State<BatchHome> {
 
     final image = await _picker.pickImage(
       source: ImageSource.camera,
-      imageQuality: 95,
+      imageQuality: 90,
+      maxWidth: 2200,
+      maxHeight: 2200,
     );
     if (image == null || !mounted) return;
 
@@ -213,7 +215,11 @@ class _BatchHomeState extends State<BatchHome> {
       _snack('Still reading the previous card. Please wait.');
       return;
     }
-    final images = await _picker.pickMultiImage(imageQuality: 95);
+    final images = await _picker.pickMultiImage(
+      imageQuality: 90,
+      maxWidth: 2200,
+      maxHeight: 2200,
+    );
     if (images.isEmpty || !mounted) return;
     for (final image in images) {
       final card = ScanCard(
