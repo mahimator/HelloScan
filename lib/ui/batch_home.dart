@@ -1084,10 +1084,26 @@ class _BatchHomeState extends State<BatchHome> {
           card.email = value;
           card.editedFields.add('email');
         }),
+        if (card.emails.length > 1)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Text(
+              'Additional emails: ${card.emails.skip(1).join(', ')}',
+              style: const TextStyle(color: _kOnSurfaceVariant, fontSize: 12),
+            ),
+          ),
         field('phone', 'Phone', card.phone, (value) {
           card.phone = value;
           card.editedFields.add('phone');
         }),
+        if (card.phones.length > 1)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Text(
+              'Additional phones: ${card.phones.skip(1).join(', ')}',
+              style: const TextStyle(color: _kOnSurfaceVariant, fontSize: 12),
+            ),
+          ),
         field('website', 'Website', card.website, (value) {
           card.website = value;
           card.editedFields.add('website');
