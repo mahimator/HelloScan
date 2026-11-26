@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:llamadart/llamadart.dart';
@@ -28,6 +29,7 @@ class SemanticCardRefiner {
 
   LlamaEngine? _engine;
   Future<LlamaEngine>? _loading;
+  Future<void> _inferenceQueue = Future<void>.value();
   bool _enabled = true;
   bool _modelLoaded = false;
 
@@ -74,6 +76,17 @@ class SemanticCardRefiner {
       print('HelloScan: Neural engine loading model from Hugging Face…');
       final engine = await LlamaEngine.load(
         LlamaModel(ModelSource.parse(modelUri)),
+        // Keep native memory use predictable on entry-level Android devices.
+        // The task is short text classification, so a 1K context is sufficient.
+        params: const ModelParams(
+          contextSize: 1024,
+          batchSize: 128,
+          microBatchSize: 128,
+          maxParallelSequences: 1,
+          numberOfThreads: 2,
+          numberOfThreadsBatch: 2,
+          gpuLayers: 0,
+        ),
       );
       _engine = engine;
       _loading = null;
@@ -99,7 +112,25 @@ class SemanticCardRefiner {
   /// Refines only the name/company pair. All other parsed fields are retained.
   /// Skips inference entirely when disabled or when the rule-based parser
   /// already has a clear, corroborated company and plausible person name.
-  Future<ParsedCard> refine(ParsedCard parsed) async {
+  Future<T> _serializeInference<T>(Future<T> Function() operation) async {
+    final previous = _inferenceQueue;
+    final release = Completer<void>();
+    _inferenceQueue = release.future;
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release.complete();
+    }
+  }
+
+  Future<ParsedCard> refine(ParsedCard parsed) {
+    // llama.cpp owns native state. Never issue overlapping generations against
+    // the same engine, even if paste, single scan, and batch paths overlap.
+    return _serializeInference(() => _refineSerial(parsed));
+  }
+
+  Future<ParsedCard> _refineSerial(ParsedCard parsed) async {
     if (!_enabled) return parsed;
 
     final raw = parsed.rawText.trim();
