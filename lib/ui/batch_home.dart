@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../models/ocr_document.dart';
 import '../models/parsed_card.dart';
 import '../models/scan_card.dart';
 import '../services/batch_export.dart';
@@ -52,7 +53,7 @@ class _BatchHomeState extends State<BatchHome> {
 
   _ScanMode _mode = _ScanMode.single;
 
-  /// When true, skips image enhancement for faster (lower-quality) OCR.
+  /// When true, uses the lighter preprocessing profile for faster OCR.
   bool _fastScan = false;
 
   /// Lock so only one OCR extraction runs at a time. Prevents the batch from
@@ -105,7 +106,9 @@ class _BatchHomeState extends State<BatchHome> {
 
     final image = await _picker.pickImage(
       source: ImageSource.camera,
-      imageQuality: 95,
+      imageQuality: 90,
+      maxWidth: 2200,
+      maxHeight: 2200,
     );
     if (image == null || !mounted) return;
 
@@ -213,7 +216,11 @@ class _BatchHomeState extends State<BatchHome> {
       _snack('Still reading the previous card. Please wait.');
       return;
     }
-    final images = await _picker.pickMultiImage(imageQuality: 95);
+    final images = await _picker.pickMultiImage(
+      imageQuality: 90,
+      maxWidth: 2200,
+      maxHeight: 2200,
+    );
     if (images.isEmpty || !mounted) return;
     for (final image in images) {
       final card = ScanCard(
@@ -273,21 +280,21 @@ class _BatchHomeState extends State<BatchHome> {
     for (final card in unprocessed) {
       if (!mounted) break;
       try {
-        final texts = <String>[];
+        final documents = <OcrDocument>[];
         if (card.front != null) {
-          texts.add(await _ocrService.recognize(
+          documents.add(await _ocrService.recognizeDocument(
             File(card.front!.path),
             fast: card.fastScan,
           ));
         }
         if (card.back != null) {
-          texts.add(await _ocrService.recognize(
+          documents.add(await _ocrService.recognizeDocument(
             File(card.back!.path),
             fast: card.fastScan,
           ));
         }
 
-        final parsed = const CardParser().parseMany(texts);
+        final parsed = const CardParser().parseManyDocuments(documents);
         if (!mounted) break;
 
         setState(() {
@@ -333,21 +340,21 @@ class _BatchHomeState extends State<BatchHome> {
     });
 
     try {
-      final texts = <String>[];
+      final documents = <OcrDocument>[];
       if (card.front != null) {
-        texts.add(await _ocrService.recognize(
+        documents.add(await _ocrService.recognizeDocument(
           File(card.front!.path),
           fast: card.fastScan,
         ));
       }
       if (card.back != null) {
-        texts.add(await _ocrService.recognize(
+        documents.add(await _ocrService.recognizeDocument(
           File(card.back!.path),
           fast: card.fastScan,
         ));
       }
 
-      final parsed = const CardParser().parseMany(texts);
+      final parsed = const CardParser().parseManyDocuments(documents);
       if (!mounted) return;
 
       setState(() {
@@ -390,6 +397,25 @@ class _BatchHomeState extends State<BatchHome> {
     apply('company', parsed.company, (value) => card.company = value);
     apply('email', parsed.email, (value) => card.email = value);
     apply('phone', parsed.phone, (value) => card.phone = value);
+
+    // Keep every detected value for CRM export, even though the current editor
+    // exposes the primary email and phone as scalar fields.
+    if (!card.editedFields.contains('email')) {
+      final detectedEmails = parsed.emails.isNotEmpty
+          ? parsed.emails
+          : <String>[parsed.email];
+      card.emails
+        ..clear()
+        ..addAll(detectedEmails.where((value) => value.trim().isNotEmpty));
+    }
+    if (!card.editedFields.contains('phone')) {
+      final detectedPhones = parsed.phones.isNotEmpty
+          ? parsed.phones
+          : <String>[parsed.phone];
+      card.phones
+        ..clear()
+        ..addAll(detectedPhones.where((value) => value.trim().isNotEmpty));
+    }
     apply('website', parsed.website, (value) => card.website = value);
     apply('address', parsed.address, (value) => card.address = value);
 
@@ -561,7 +587,7 @@ class _BatchHomeState extends State<BatchHome> {
               ),
             ],
           ),
-          // Fast scan toggle: skips image enhancement for speed.
+          // Fast scan toggle: uses lighter contrast processing for speed.
           Switch(
             value: _fastScan,
             onChanged: (value) => setState(() => _fastScan = value),
@@ -975,7 +1001,13 @@ class _BatchHomeState extends State<BatchHome> {
                   )
                 : ClipRRect(
                     borderRadius: BorderRadius.circular(9),
-                    child: Image.file(File(image.path), fit: BoxFit.cover),
+                    child: Image.file(
+                      File(image.path),
+                      fit: BoxFit.cover,
+                      cacheWidth: 360,
+                      cacheHeight: 240,
+                      filterQuality: FilterQuality.low,
+                    ),
                   ),
           ),
         ),
@@ -1052,10 +1084,26 @@ class _BatchHomeState extends State<BatchHome> {
           card.email = value;
           card.editedFields.add('email');
         }),
+        if (card.emails.length > 1)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Text(
+              'Additional emails: ${card.emails.skip(1).join(', ')}',
+              style: const TextStyle(color: _kOnSurfaceVariant, fontSize: 12),
+            ),
+          ),
         field('phone', 'Phone', card.phone, (value) {
           card.phone = value;
           card.editedFields.add('phone');
         }),
+        if (card.phones.length > 1)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Text(
+              'Additional phones: ${card.phones.skip(1).join(', ')}',
+              style: const TextStyle(color: _kOnSurfaceVariant, fontSize: 12),
+            ),
+          ),
         field('website', 'Website', card.website, (value) {
           card.website = value;
           card.editedFields.add('website');

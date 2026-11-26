@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:helloscan/models/ocr_document.dart';
 import 'package:helloscan/services/card_parser.dart';
 
 void main() {
@@ -138,6 +139,76 @@ Bengaluru 560102''';
       expect(result.phone, '+919812345678');
       expect(result.company.toLowerCase(), contains('acrne'));
       expect(result.address.toLowerCase(), contains('bengaluru'));
+    });
+
+
+    test('extracts Samanga Utilities contact details', () {
+      final result = parser.parse('''
+samanga
+UTILITIES
+Irene Kayaga
+Water Solutions Engineer
++256 704 916 489
+irene.kayaga@samangasolutions.com
+www.samangasolutions.com
+Plot 12 Bukoto Street, Kamwokya, Kampala''');
+
+      expect(result.name, 'Irene Kayaga');
+      expect(result.designation, contains('Water Solutions Engineer'));
+      expect(result.company.toLowerCase(), contains('samanga'));
+      expect(result.emails, contains('irene.kayaga@samangasolutions.com'));
+      expect(result.phones, contains('+256704916489'));
+      expect(result.website, contains('samangasolutions.com'));
+      expect(result.address.toLowerCase(), contains('bukoto street'));
+    });
+
+    test('preserves multiple contacts when parsing both sides', () {
+      final result = parser.parseMany([
+        'Joshua Kanyesigye, PMP\nFounder & CEO\n+256 793 661 811\nj.kanyesigye@cmgminerals.com\nwww.cmgminerals.com',
+        'Tel: +256 793 193 951\nMineral Project Development\nPlot 1, Kampala',
+      ]);
+
+      expect(result.name, contains('Joshua Kanyesigye'));
+      expect(result.emails, contains('j.kanyesigye@cmgminerals.com'));
+      expect(result.phones, containsAll(['+256793661811', '+256793193951']));
+    });
+
+    test('does not mistake company names for people', () {
+      final result = parser.parse('''
+Equator Chocolate
+Artisanal single origin Ugandan chocolate
+Ele Jan Saaf
+Continuance Manager
++256-0778-211289 / +31-6-52636031
+info@chocolate.ug
+www.chocolate.ug
+P.O. Box 128039, Kampala, Uganda''');
+
+      expect(result.name, 'Ele Jan Saaf');
+      expect(result.company.toLowerCase(), contains('equator'));
+      expect(result.phones, hasLength(2));
+      expect(result.emails, contains('info@chocolate.ug'));
+    });
+
+    test('parses structured OCR blocks while preserving line grouping', () {
+      final document = OcrDocument(
+        text: 'MAYA PATEL\nOperations Director\nNorthstar Utilities',
+        blocks: [
+          OcrBlock(
+            text: 'MAYA PATEL\nOperations Director\nNorthstar Utilities',
+            lines: [
+              OcrLine(text: 'MAYA PATEL', left: 30, top: 20, right: 240, bottom: 55),
+              OcrLine(text: 'Operations Director', left: 30, top: 70, right: 260, bottom: 105),
+              OcrLine(text: 'Northstar Utilities', left: 30, top: 125, right: 280, bottom: 160),
+            ],
+          ),
+        ],
+      );
+
+      final result = parser.parseManyDocuments([document]);
+      expect(result.name, 'Maya Patel');
+      expect(result.designation, contains('Director'));
+      expect(result.company, contains('Northstar'));
     });
 
     test('never throws on empty or garbage input', () {

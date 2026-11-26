@@ -1,4 +1,5 @@
 import '../models/parsed_card.dart';
+import '../models/ocr_document.dart';
 
 /// Turns noisy OCR text from a visiting card into structured contact fields.
 ///
@@ -40,6 +41,12 @@ class CardParser {
     'biz',
     'us',
     'uk',
+    'ug',
+    'ke',
+    'tz',
+    'rw',
+    'za',
+    'nl',
     'in',
     'ca',
     'de',
@@ -397,6 +404,29 @@ class CardParser {
     'exports',
     'imports',
     'enterprise',
+    // Common industry descriptors: many real companies omit legal suffixes.
+    'utilities',
+    'utility',
+    'minerals',
+    'mineral',
+    'mining',
+    'chocolate',
+    'foods',
+    'food',
+    'beverages',
+    'beverage',
+    'manufacturing',
+    'logistics',
+    'foundation',
+    'institute',
+    'university',
+    'hospital',
+    'clinic',
+    'hotel',
+    'construction',
+    'engineering',
+    'energy',
+    'agriculture',
   ];
 
   static const List<String> _addressKeywords = <String>[
@@ -532,6 +562,23 @@ class CardParser {
       phones: phones,
       rawText: text,
     );
+  }
+
+  /// Parses structured OCR documents while preserving ML Kit's block and
+  /// line grouping. This prevents consumers from flattening all recognized
+  /// words into a single unstructured token stream before classification.
+  ParsedCard parseManyDocuments(Iterable<OcrDocument> documents) {
+    final texts = documents.map((document) {
+      final blockText = document.blocks
+          .map((block) => block.lines
+              .map((line) => line.text.trim())
+              .where((line) => line.isNotEmpty)
+              .join('\n'))
+          .where((block) => block.isNotEmpty)
+          .join('\n');
+      return blockText.isNotEmpty ? blockText : document.text;
+    });
+    return parseMany(texts);
   }
 
   /// Parses and merges multiple sides of the same card (front and back).
@@ -901,9 +948,9 @@ class CardParser {
           score += keyword.contains(' ') || keyword.contains('.') ? 3 : 2;
         }
       }
-      if (_companyKeywords.any((keyword) => _hasKeyword(lower, keyword))) {
-        score -= 1;
-      }
+      // Do not penalize a designation because it contains a descriptor
+      // that can also occur in an organization name (e.g. "Water Solutions
+      // Engineer"). A strong role keyword should remain decisive.
 
       if (score > bestScore) {
         bestScore = score;
@@ -960,8 +1007,35 @@ class CardParser {
     var best = '';
     var bestScore = -1000;
 
+    // Some printed logos are split into a brand word and an industry label
+    // (for example "samanga" on one line and "UTILITIES" below it). Evaluate
+    // adjacent pairs only when one line has a company marker and neither is
+    // a person/title/contact candidate.
+    final candidates = <({String text, int index})>[];
     for (var i = 0; i < lines.length; i++) {
-      final candidate = _stripLabel(lines[i]);
+      candidates.add((text: lines[i], index: i));
+      if (i + 1 >= lines.length) continue;
+      final first = lines[i].trim();
+      final second = lines[i + 1].trim();
+      final firstLower = first.toLowerCase();
+      final secondLower = second.toLowerCase();
+      final firstMarked = _companyKeywords.any((kw) => _hasKeyword(firstLower, kw));
+      final secondMarked = _companyKeywords.any((kw) => _hasKeyword(secondLower, kw));
+      final firstIsTitle = _designationKeywords.any((kw) => _hasKeyword(firstLower, kw));
+      final secondIsTitle = _designationKeywords.any((kw) => _hasKeyword(secondLower, kw));
+      if ((firstMarked || secondMarked) &&
+          !firstIsTitle && !secondIsTitle &&
+          !_isLikelyName(first) && !_isLikelyName(second) &&
+          first.length <= 35 && second.length <= 35 &&
+          !_emailPattern.hasMatch(first) && !_emailPattern.hasMatch(second) &&
+          !_urlPattern.hasMatch(first) && !_urlPattern.hasMatch(second)) {
+        candidates.add((text: '$first $second', index: i));
+      }
+    }
+
+    for (final item in candidates) {
+      final i = item.index;
+      final candidate = _stripLabel(item.text);
       if (candidate.isEmpty || candidate.length > 80) continue;
       if (_emailPattern.hasMatch(candidate)) continue;
       // A bare URL/domain with no spaces is a website, not a company name.
@@ -1053,7 +1127,21 @@ class CardParser {
       RegExp(r'[^a-z0-9]'),
       '',
     );
-    return normalRoot.length >= 3 && normalCandidate.contains(normalRoot);
+    if (normalRoot.length < 3 || normalCandidate.isEmpty) return false;
+    if (normalCandidate.contains(normalRoot) ||
+        normalRoot.contains(normalCandidate)) {
+      return true;
+    }
+
+    // Business names and domains often share only the brand token:
+    // "Samanga Utilities" / "samangasolutions.com". Treat a meaningful
+    // token overlap as corroboration without synthesizing a company from
+    // the domain itself.
+    final tokens = candidate
+        .toLowerCase()
+        .split(RegExp(r'[^a-z0-9]+'))
+        .where((token) => token.length >= 4);
+    return tokens.any((token) => normalRoot.contains(token));
   }
 
   // ---------------------------------------------------------------------------

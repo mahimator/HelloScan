@@ -53,8 +53,8 @@ class ParsedCard {
   ///
   /// Scalar fields prefer the first non-empty value; lists are unioned.
   ParsedCard merge(ParsedCard other) {
-    final mergedEmails = _union(emails, other.emails);
-    final mergedPhones = _union(phones, other.phones);
+    final mergedEmails = _unionEmails(emails, other.emails);
+    final mergedPhones = _unionPhones(phones, other.phones);
     return ParsedCard(
       name: _prefer(name, other.name),
       designation: _prefer(designation, other.designation),
@@ -87,10 +87,25 @@ class ParsedCard {
     return b.trim().length > a.trim().length ? b : a;
   }
 
-  static List<String> _union(List<String> a, List<String> b) {
-    final result = <String>[...a];
-    for (final value in b) {
-      if (!result.contains(value)) result.add(value);
+  static List<String> _unionEmails(List<String> a, List<String> b) {
+    final result = <String>[];
+    final seen = <String>{};
+    for (final value in <String>[...a, ...b]) {
+      final trimmed = value.trim();
+      final key = trimmed.toLowerCase();
+      if (trimmed.isNotEmpty && seen.add(key)) result.add(trimmed);
+    }
+    return result;
+  }
+
+  static List<String> _unionPhones(List<String> a, List<String> b) {
+    final result = <String>[];
+    final seen = <String>{};
+    for (final value in <String>[...a, ...b]) {
+      final trimmed = value.trim();
+      final digits = trimmed.replaceAll(RegExp(r'[^0-9]'), '');
+      final key = digits.isEmpty ? trimmed : digits;
+      if (trimmed.isNotEmpty && seen.add(key)) result.add(trimmed);
     }
     return result;
   }

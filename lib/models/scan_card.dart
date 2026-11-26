@@ -1,9 +1,6 @@
 import 'package:image_picker/image_picker.dart';
 
-/// A single staged visiting card in the temporary batch.
-///
-/// Cards are intentionally ephemeral: they live only in memory until the batch
-/// is reviewed and exported as CRM-ready JSON.
+/// A single staged visiting card. Image files remain local and are not exported.
 class ScanCard {
   ScanCard({
     required this.id,
@@ -17,19 +14,18 @@ class ScanCard {
     this.website = '',
     this.address = '',
     this.notes = '',
+    List<String>? emails,
+    List<String>? phones,
     this.isTwoSided = false,
     this.fastScan = false,
-  });
+  }) : emails = emails ?? <String>[],
+       phones = phones ?? <String>[];
 
   final String id;
   XFile? front;
   XFile? back;
 
-  /// True when the card has a back side to scan. Set from the one/two-sided
-  /// prompt so the UI knows to offer "Scan back" after the front.
   bool isTwoSided;
-
-  /// When true, skips image enhancement for faster (lower-quality) OCR.
   bool fastScan;
   String name;
   String title;
@@ -40,23 +36,16 @@ class ScanCard {
   String address;
   String notes;
 
-  /// User has explicitly confirmed the card contents.
+  /// All recognised contact points, not just the primary editable value.
+  /// The scalar [email] and [phone] remain for compatibility with the editor.
+  final List<String> emails;
+  final List<String> phones;
+
   bool reviewed = false;
-
-  /// True while OCR is running for this card.
   bool extracting = false;
-
-  /// Null when not attempted, true when OCR produced nothing usable.
   bool? ocrFailed;
-
-  /// Number of contact fields that were auto-filled from the last OCR pass.
   int detectedFields = 0;
-
-  /// Bumped whenever OCR rewrites fields so the editor can rebuild from the
-  /// model. Typing does not bump this, so the cursor stays put while editing.
   int revision = 0;
-
-  /// Field names the user typed into; OCR must never overwrite these.
   final Set<String> editedFields = <String>{};
 
   String? _nonEmpty(String value) {
@@ -64,15 +53,22 @@ class ScanCard {
     return trimmed.isEmpty ? null : trimmed;
   }
 
-  List<String> _nonEmptyList(String value) {
-    final trimmed = value.trim();
-    return trimmed.isEmpty ? <String>[] : <String>[trimmed];
+  List<String> _values(List<String> values, String primary) {
+    final result = <String>[];
+    for (final value in <String>[primary, ...values]) {
+      final trimmed = value.trim();
+      if (trimmed.isNotEmpty && !result.contains(trimmed)) result.add(trimmed);
+    }
+    return result;
   }
 
   Map<String, dynamic> toJson() => {
     'person': {'name': _nonEmpty(name), 'designation': _nonEmpty(title)},
     'organization': {'name': _nonEmpty(company), 'website': _nonEmpty(website)},
-    'contact': {'emails': _nonEmptyList(email), 'phones': _nonEmptyList(phone)},
+    'contact': {
+      'emails': _values(emails, email),
+      'phones': _values(phones, phone),
+    },
     'location': {'full_address': _nonEmpty(address)},
     'notes': _nonEmpty(notes),
     'source': {
