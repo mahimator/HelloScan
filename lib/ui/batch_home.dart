@@ -394,16 +394,20 @@ class _BatchHomeState extends State<BatchHome> {
     // Keep every detected value for CRM export, even though the current editor
     // exposes the primary email and phone as scalar fields.
     if (!card.editedFields.contains('email')) {
+      final detectedEmails = parsed.emails.isNotEmpty
+          ? parsed.emails
+          : <String>[parsed.email];
       card.emails
         ..clear()
-        ..addAll(parsed.emails.isNotEmpty ? parsed.emails : [parsed.email]
-          ..where((value) => value.trim().isNotEmpty));
+        ..addAll(detectedEmails.where((value) => value.trim().isNotEmpty));
     }
     if (!card.editedFields.contains('phone')) {
+      final detectedPhones = parsed.phones.isNotEmpty
+          ? parsed.phones
+          : <String>[parsed.phone];
       card.phones
         ..clear()
-        ..addAll(parsed.phones.isNotEmpty ? parsed.phones : [parsed.phone]
-          ..where((value) => value.trim().isNotEmpty));
+        ..addAll(detectedPhones.where((value) => value.trim().isNotEmpty));
     }
     apply('website', parsed.website, (value) => card.website = value);
     apply('address', parsed.address, (value) => card.address = value);
