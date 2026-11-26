@@ -948,9 +948,9 @@ class CardParser {
           score += keyword.contains(' ') || keyword.contains('.') ? 3 : 2;
         }
       }
-      if (_companyKeywords.any((keyword) => _hasKeyword(lower, keyword))) {
-        score -= 1;
-      }
+      // Do not penalize a designation because it contains a descriptor
+      // that can also occur in an organization name (e.g. "Water Solutions
+      // Engineer"). A strong role keyword should remain decisive.
 
       if (score > bestScore) {
         bestScore = score;
@@ -1023,7 +1023,9 @@ class CardParser {
       final secondMarked = _companyKeywords.any((kw) => _hasKeyword(secondLower, kw));
       final firstIsTitle = _designationKeywords.any((kw) => _hasKeyword(firstLower, kw));
       final secondIsTitle = _designationKeywords.any((kw) => _hasKeyword(secondLower, kw));
-      if ((firstMarked || secondMarked) && !firstIsTitle && !secondIsTitle &&
+      if ((firstMarked || secondMarked) &&
+          !firstIsTitle && !secondIsTitle &&
+          !_isLikelyName(first) && !_isLikelyName(second) &&
           first.length <= 35 && second.length <= 35 &&
           !_emailPattern.hasMatch(first) && !_emailPattern.hasMatch(second) &&
           !_urlPattern.hasMatch(first) && !_urlPattern.hasMatch(second)) {
@@ -1125,7 +1127,21 @@ class CardParser {
       RegExp(r'[^a-z0-9]'),
       '',
     );
-    return normalRoot.length >= 3 && normalCandidate.contains(normalRoot);
+    if (normalRoot.length < 3 || normalCandidate.isEmpty) return false;
+    if (normalCandidate.contains(normalRoot) ||
+        normalRoot.contains(normalCandidate)) {
+      return true;
+    }
+
+    // Business names and domains often share only the brand token:
+    // "Samanga Utilities" / "samangasolutions.com". Treat a meaningful
+    // token overlap as corroboration without synthesizing a company from
+    // the domain itself.
+    final tokens = candidate
+        .toLowerCase()
+        .split(RegExp(r'[^a-z0-9]+'))
+        .where((token) => token.length >= 4);
+    return tokens.any((token) => normalRoot.contains(token));
   }
 
   // ---------------------------------------------------------------------------
