@@ -973,8 +973,9 @@ class CardParser {
     List<String> websites,
     String designation,
   ) {
+    // A domain can corroborate a printed company name, but must never be
+    // converted into a company name by itself.
     final rootLabels = <String>{};
-
     for (final website in websites) {
       final label = _rootLabel(_hostOf(website));
       if (label.isNotEmpty &&
@@ -992,108 +993,84 @@ class CardParser {
       }
     }
 
-    // --- Hard semantic layer -----------------------------------------------
-    // A position/designation word is NEVER a company. If a candidate looks
-    // like a job title, disqualify it outright so it can never leak into
-    // the company field.
-    //
-    // The domain root (from website or email) is used ONLY to confirm a
-    // company line that already exists on the card. The domain is NEVER
-    // used as the company name itself — an email domain like
-    // "acrne-tech.com" must never become company "Acrne".
-    //
-    // If no explicit company line exists on the card, company stays empty.
-
     var best = '';
     var bestScore = -1000;
-
-    // Some printed logos are split into a brand word and an industry label
-    // (for example "samanga" on one line and "UTILITIES" below it). Evaluate
-    // adjacent pairs only when one line has a company marker and neither is
-    // a person/title/contact candidate.
     final candidates = <({String text, int index})>[];
+
     for (var i = 0; i < lines.length; i++) {
       candidates.add((text: lines[i], index: i));
+
+      // Logos are frequently split across two OCR lines:
+      // "HEIFER" / "INTERNATIONAL", "SAMANGA" / "UTILITIES".
       if (i + 1 >= lines.length) continue;
       final first = lines[i].trim();
       final second = lines[i + 1].trim();
-      final firstLower = first.toLowerCase();
-      final secondLower = second.toLowerCase();
-      final firstMarked = _companyKeywords.any((kw) => _hasKeyword(firstLower, kw));
-      final secondMarked = _companyKeywords.any((kw) => _hasKeyword(secondLower, kw));
-      final firstIsTitle = _designationKeywords.any((kw) => _hasKeyword(firstLower, kw));
-      final secondIsTitle = _designationKeywords.any((kw) => _hasKeyword(secondLower, kw));
-      if ((firstMarked || secondMarked) &&
-          !firstIsTitle && !secondIsTitle &&
-          !_isLikelyName(first) && !_isLikelyName(second) &&
-          first.length <= 35 && second.length <= 35 &&
-          !_emailPattern.hasMatch(first) && !_emailPattern.hasMatch(second) &&
-          !_urlPattern.hasMatch(first) && !_urlPattern.hasMatch(second)) {
-        candidates.add((text: '$first $second', index: i));
+      if (first.isEmpty || second.isEmpty ||
+          first.length > 35 || second.length > 35) {
+        continue;
+      }
+      if (_emailPattern.hasMatch(first) || _emailPattern.hasMatch(second) ||
+          _urlPattern.hasMatch(first) || _urlPattern.hasMatch(second)) {
+        continue;
+      }
+      if (_designationKeywords.any((kw) => _hasKeyword(first.toLowerCase(), kw)) ||
+          _designationKeywords.any((kw) => _hasKeyword(second.toLowerCase(), kw))) {
+        continue;
+      }
+      if (_isLikelyName(first) || _isLikelyName(second)) continue;
+
+      final combined = '$first $second';
+      final hasMarker = _hasCompanySuffix(combined) ||
+          _hasIndustryCompanyEnding(combined);
+      final hasDomainMatch = rootLabels.any((root) => _domainMatches(combined, root));
+      if (hasMarker || hasDomainMatch) {
+        candidates.add((text: combined, index: i));
       }
     }
 
     for (final item in candidates) {
-      final i = item.index;
-      final candidate = _stripLabel(item.text);
+      final candidate = _cleanEntity(_stripLabel(item.text));
       if (candidate.isEmpty || candidate.length > 80) continue;
       if (_emailPattern.hasMatch(candidate)) continue;
-      // A bare URL/domain with no spaces is a website, not a company name.
-      if (_urlPattern.hasMatch(candidate) && !candidate.contains(' ')) {
-        continue;
-      }
+      if (_urlPattern.hasMatch(candidate) && !candidate.contains(' ')) continue;
 
       final lower = candidate.toLowerCase();
 
-      // --- Position words are disqualified as company ----------------------
-      final isDesignation = _designationKeywords.any(
-        (kw) => _hasKeyword(lower, kw),
-      );
-      if (isDesignation) continue;
-
-      var score = 0;
-
-      // --- Company suffixes score positively -------------------------------
-      var hasCompanySuffix = false;
-      for (final keyword in _companyKeywords) {
-        if (_hasKeyword(lower, keyword)) {
-          score += keyword.length >= 5 ? 3 : 2;
-          hasCompanySuffix = true;
-        }
-      }
-
-      // --- Domain root match confirms an existing company line -------------
-      // The domain boosts a line that already looks like a company, but the
-      // domain itself is never the company name.
-      var domainMatch = false;
-      for (final label in rootLabels) {
-        if (_domainMatches(candidate, label)) {
-          // Only give the domain boost if the line has company-like
-          // characteristics (suffix or multiple words). A bare domain root
-          // like "acrne" on its own is not a company name.
-          if (hasCompanySuffix || wordsCount(candidate) >= 2) {
-            score += 20;
-            domainMatch = true;
-          }
-        }
-      }
-
-      // All-caps multi-word token near the top of the card is likely a
-      // company name, but only if it is not a designation word.
-      if (i <= 3 &&
-          wordsCount(candidate) >= 2 &&
-          candidate == candidate.toUpperCase() &&
-          RegExp(r'[A-Z]{2,}').hasMatch(candidate) &&
-          candidate.length <= 40) {
-        score += 2;
-      }
-
-      // A domain-root match always wins, even over a higher-scored non-match.
-      if (domainMatch && score > bestScore) {
-        bestScore = score;
-        best = candidate;
+      // Never classify job titles, people, addresses or promotional copy as
+      // an organization. Slogan filtering is deliberately conservative.
+      if (_designationKeywords.any((kw) => _hasKeyword(lower, kw))) continue;
+      if (_looksLikeCompanySlogan(lower)) continue;
+      if (_addressKeywords.any((kw) => _hasKeyword(lower, kw)) &&
+          RegExp(r'\d').hasMatch(candidate)) {
         continue;
       }
+
+      final legalSuffix = _hasCompanySuffix(candidate);
+      final industryEnding = _hasIndustryCompanyEnding(candidate);
+      final domainMatch = rootLabels.any((root) => _domainMatches(candidate, root));
+
+      var score = 0;
+      if (legalSuffix) score += 14;
+      if (industryEnding) score += 9;
+      if (domainMatch) score += 25;
+
+      // An unmarked multiword brand is accepted only when corroborated by
+      // the website/email domain. A single-word brand without a suffix is
+      // intentionally left for manual correction.
+      if (!legalSuffix && !industryEnding && !domainMatch) continue;
+
+      // Prefer concise, brand-like lines over long promotional phrases.
+      final count = wordsCount(candidate);
+      if (count >= 2 && count <= 5) score += 2;
+      if (count > 6) score -= 5;
+      if (item.index <= 3) score += 2;
+      if (candidate == candidate.toUpperCase() &&
+          RegExp(r'[A-Z]{2,}').hasMatch(candidate)) {
+        score += 1;
+      }
+
+      // A confirmed domain match outranks suffix-only candidates.
+      if (domainMatch) score += 10;
 
       if (score > bestScore) {
         bestScore = score;
@@ -1101,17 +1078,65 @@ class CardParser {
       }
     }
 
-    // A confirmed domain-root match on a real company line is authoritative.
-    if (best.isNotEmpty && bestScore >= 20) {
-      return _cleanEntity(best);
-    }
+    return best.isEmpty ? '' : _cleanEntity(best);
+  }
 
-    // Normal threshold for suffix/heuristic matches.
-    if (bestScore >= 2) return _cleanEntity(best);
+  bool _hasCompanySuffix(String value) {
+    // Legal forms, including common OCR punctuation/spacing variants.
+    // The suffix must occur at the END of the candidate.
+    return RegExp(
+      r'(?:^|[\s,])(?:'
+      r'pvt\.?\s*(?:ltd\.?|limited)|private\s+limited|'
+      r'public\s+limited|'
+      r'ltd\.?|limited|'
+      r'llc|l\.l\.c\.|'
+      r'inc\.?|incorporated|'
+      r'corp\.?|corporation|'
+      r'company|co\.|'
+      r'llp|plc|'
+      r'gmbh|ag|'
+      r'pty\s*ltd\.?|'
+      r'pte\.?\s*ltd\.?|'
+      r'sdn\.?\s*bhd\.?|'
+      r'bv|nv|'
+      r's\.a\.?|s\.r\.l\.?|srl|s\.p\.a\.?|'
+      r'sas|s\.a\.s\.?|sro|oy|ab|'
+      r'fz-llc|fze|fzco'
+      r')\s*\.?$',
+      caseSensitive: false,
+    ).hasMatch(value.trim());
+  }
 
-    // No explicit company line on the card: company stays empty. The domain
-    // is never used as a substitute company name.
-    return '';
+  bool _hasIndustryCompanyEnding(String value) {
+    // Industry/organization descriptors commonly used as the final word(s)
+    // of a trading name. This is intentionally an ending-only test.
+    return RegExp(
+      r'\b(?:'
+      r'solutions?|technolog(?:y|ies)|systems?|services?|'
+      r'labs?|laboratories|groups?|enterprises?|industries?|'
+      r'ventures?|consulting|studios?|agenc(?:y|ies)|'
+      r'associates?|holdings?|partners?|international|global|'
+      r'traders?|exports?|imports?|utilities|utility|'
+      r'minerals?|mining|chocolate|foods?|beverages?|'
+      r'manufacturing|logistics|foundations?|institutes?|'
+      r'universit(?:y|ies)|hospitals?|clinics?|hotels?|'
+      r'construction|engineering|energy|agriculture'
+      r')$',
+      caseSensitive: false,
+    ).hasMatch(value.trim());
+  }
+
+  bool _looksLikeCompanySlogan(String lower) {
+    return RegExp(
+      r'\b(?:'
+      r'unlocking|building|delivering|empowering|transforming|'
+      r'creating|connecting|inspiring|shaping|driving|'
+      r'your\s+trusted|your\s+partner|we\s+(?:are|make|build|deliver)|'
+      r'scan\s+to|scan\s+me|visit\s+us|follow\s+us|'
+      r'lasting\s+value|potential|excellence|quality\s+first'
+      r')\b',
+      caseSensitive: false,
+    ).hasMatch(lower);
   }
 
   int wordsCount(String value) {
