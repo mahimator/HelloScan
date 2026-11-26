@@ -397,6 +397,22 @@ class CardParser {
     'exports',
     'imports',
     'enterprise',
+    // Common organization/industry descriptors. These are soft signals,
+    // never mandatory suffixes or hard proof that a line is a company.
+    'utilities',
+    'minerals',
+    'mining',
+    'chocolate',
+    'agriculture',
+    'manufacturing',
+    'foundation',
+    'university',
+    'hospital',
+    'bank',
+    'energy',
+    'resources',
+    'logistics',
+    'engineering',
   ];
 
   static const List<String> _addressKeywords = <String>[
@@ -1053,7 +1069,21 @@ class CardParser {
       RegExp(r'[^a-z0-9]'),
       '',
     );
-    return normalRoot.length >= 3 && normalCandidate.contains(normalRoot);
+    if (normalRoot.length < 3 || normalCandidate.isEmpty) return false;
+
+    // A printed organization name may use a shortened brand name while its
+    // email/website domain combines the brand with an industry term:
+    // "Samanga Utilities" vs "samangasolutions.com", or "CMG Minerals"
+    // vs "cmgminerals.com". Match meaningful candidate tokens against the
+    // domain root instead of requiring the entire root to appear verbatim.
+    if (normalCandidate.contains(normalRoot) || normalRoot.contains(normalCandidate)) {
+      return true;
+    }
+    final tokens = candidate
+        .toLowerCase()
+        .split(RegExp(r'[^a-z0-9]+'))
+        .where((token) => token.length >= 4);
+    return tokens.any((token) => normalRoot.contains(token));
   }
 
   // ---------------------------------------------------------------------------
