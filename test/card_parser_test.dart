@@ -92,6 +92,19 @@ john . doe @ example . com''');
       }
     });
 
+    test('recognizes designation words alongside company vocabulary', () {
+      final result = parser.parse('''
+Madhav Trivedi
+Water Solutions Engineer
+Samanga Utilities
+madhav@samangasolutions.com
++256 700 123456''');
+
+      expect(result.name, 'Madhav Trivedi');
+      expect(result.designation, 'Water Solutions Engineer');
+      expect(result.company, 'Samanga Utilities');
+    });
+
     test('retains every email and phone candidate', () {
       final result = parser.parse('''
 Madhav Trivedi
