@@ -71,6 +71,7 @@ class SemanticCardRefiner {
 
   Future<LlamaEngine> _loadEngine() async {
     try {
+      print('HelloScan: Neural engine loading model from Hugging Face…');
       final engine = await LlamaEngine.load(
         LlamaModel(ModelSource.parse(modelUri)),
       );
@@ -79,9 +80,11 @@ class SemanticCardRefiner {
       _modelLoaded = true;
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_prefsModelLoadedKey, true);
+      print('HelloScan: Neural engine model loaded successfully');
       return engine;
-    } catch (_) {
+    } catch (e) {
       _loading = null;
+      print('HelloScan: Neural engine load failed: $e');
       rethrow;
     }
   }
@@ -110,7 +113,9 @@ class SemanticCardRefiner {
     if (!needsReview) return parsed;
 
     try {
+      print('HelloScan: Neural engine starting inference…');
       final engine = await _getEngine();
+      print('HelloScan: Neural engine loaded, running inference…');
       final lines = raw
           .split(RegExp(r'[\r\n]+'))
           .map((line) => line.trim())
@@ -146,8 +151,12 @@ ${jsonEncode(lines)}
         ),
       ).text();
 
+      print('HelloScan: Neural engine inference complete');
       final result = _decode(output);
-      if (result == null || result.confidence < 0.55) return parsed;
+      if (result == null || result.confidence < 0.55) {
+        print('HelloScan: Neural engine returned low confidence or null');
+        return parsed;
+      }
 
       final refinedName = _verifiedSelection(result.personName, lines);
       final refinedCompany = _verifiedSelection(result.company, lines);
@@ -164,8 +173,9 @@ ${jsonEncode(lines)}
         phones: parsed.phones,
         rawText: parsed.rawText,
       );
-    } catch (_) {
+    } catch (e) {
       // Engine failures must never block OCR.
+      print('HelloScan: Neural engine inference failed: $e');
       return parsed;
     }
   }

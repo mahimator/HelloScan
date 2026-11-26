@@ -486,11 +486,12 @@ class _BatchHomeState extends State<BatchHome> {
         _snack('Neural Semantic Engine is now online.');
         setState(() {});
       }
-    } catch (_) {
+    } catch (e) {
+      debugPrint('HelloScan: Neural engine download failed: $e');
       if (mounted) {
         Navigator.pop(context);
         _snack(
-          'Could not initialize the Neural Engine. Card parsing still works.',
+          'Neural Engine download failed: $e. Card parsing still works.',
         );
       }
     }
@@ -724,7 +725,8 @@ class _BatchHomeState extends State<BatchHome> {
           'No text detected. Try better lighting or enter details manually.',
         );
       }
-    } catch (_) {
+    } catch (e, stack) {
+      debugPrint('HelloScan extraction error: $e\n$stack');
       if (!mounted) return;
       setState(() {
         card.extracting = false;
