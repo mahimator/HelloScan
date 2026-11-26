@@ -16,8 +16,8 @@ import 'package:image/image.dart' as img;
 /// "app not responding" (ANR) on large camera images.
 class ImageEnhancer {
   const ImageEnhancer({
-    this.targetWidth = 1600,
-    this.maxUpscale = 3.0,
+    this.targetWidth = 1280,
+    this.maxUpscale = 2.0,
   });
 
   /// Preferred width in pixels. Smaller images are scaled up toward this.
@@ -38,6 +38,22 @@ class ImageEnhancer {
 
     // Apply EXIF orientation so sideways phone photos are upright before OCR.
     var image = img.bakeOrientation(decoded);
+
+    // Bound peak memory on entry-level phones. A 12MP RGB decode can occupy
+    // tens of MB before temporary resize buffers; OCR does not need that much.
+    const maxDimension = 2200;
+    if (image.width > maxDimension || image.height > maxDimension) {
+      final scale = math.min(
+        maxDimension / image.width,
+        maxDimension / image.height,
+      );
+      image = img.copyResize(
+        image,
+        width: (image.width * scale).round(),
+        height: (image.height * scale).round(),
+        interpolation: img.Interpolation.average,
+      );
+    }
 
     if (!fast) {
       // Upscale small images toward [targetWidth], capped by [maxUpscale].
@@ -64,7 +80,7 @@ class ImageEnhancer {
       image = img.adjustColor(image, contrast: 1.3, brightness: 1.05);
     }
 
-    return img.encodeJpg(image, quality: 92);
+    return img.encodeJpg(image, quality: 88);
   }
 }
 
