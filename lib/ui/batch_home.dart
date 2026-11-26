@@ -11,6 +11,7 @@ import '../models/parsed_card.dart';
 import '../models/scan_card.dart';
 import '../services/batch_export.dart';
 import '../services/card_parser.dart';
+import '../services/semantic_card_refiner.dart';
 import '../services/mlkit_ocr_service.dart';
 import '../services/ocr_service.dart';
 
@@ -294,7 +295,9 @@ class _BatchHomeState extends State<BatchHome> {
           ));
         }
 
-        final parsed = const CardParser().parseManyDocuments(documents);
+        final parsed = await SemanticCardRefiner.instance.refine(
+          const CardParser().parseManyDocuments(documents),
+        );
         if (!mounted) break;
 
         setState(() {
@@ -467,7 +470,9 @@ class _BatchHomeState extends State<BatchHome> {
     );
     if (!mounted || text == null || text.trim().isEmpty) return;
 
-    final parsed = const CardParser().parse(text);
+    final parsed = await SemanticCardRefiner.instance.refine(
+      const CardParser().parse(text),
+    );
     final card = ScanCard(
       id: 'card-${++_counter}',
       fastScan: _fastScan,
