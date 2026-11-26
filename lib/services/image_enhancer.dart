@@ -12,7 +12,7 @@ class ImageEnhancer {
   const ImageEnhancer({
     this.maxDimension = 2200,
     this.targetWidth = 1600,
-    this.maxUpscale = 2.0,
+    this.maxUpscale = 3.0,
   });
 
   /// Maximum long edge sent to ML Kit. Keeps memory use predictable.
