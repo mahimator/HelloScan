@@ -1083,7 +1083,7 @@ class CardParser {
     if (words.length < 2) return false;
 
     final nameToken = RegExp(r"^[A-Za-z][A-Za-z'.-]*$");
-    final initialToken = RegExp(r'^(?:[A-Za-z]\\.?){1,3}$');
+    final initialToken = RegExp(r'^(?:[A-Za-z]\.?){1,3}$');
     if (words.any((word) =>
         !nameToken.hasMatch(word) && !initialToken.hasMatch(word))) {
       return false;
@@ -1135,7 +1135,7 @@ class CardParser {
           .toList();
 
       if (words.length >= 2 && words.length <= 4) score += 3;
-      if (words.any((word) => RegExp(r'^(?:[A-Za-z]\\.?){1,3}$').hasMatch(word))) {
+      if (words.any((word) => RegExp(r'^(?:[A-Za-z]\.?){1,3}$').hasMatch(word))) {
         score += 2;
       }
       if (_companyKeywords.any((kw) => _hasKeyword(candidate.toLowerCase(), kw))) {
@@ -1184,7 +1184,7 @@ class CardParser {
       value = value
           .split(' ')
           .map((word) {
-            if (RegExp(r'^(?:[A-Z]\\.?){1,3}$').hasMatch(word)) {
+            if (RegExp(r'^(?:[A-Z]\.?){1,3}$').hasMatch(word)) {
               return word;
             }
             return word
