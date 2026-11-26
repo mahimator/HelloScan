@@ -140,6 +140,44 @@ Bengaluru 560102''';
       expect(result.address.toLowerCase(), contains('bengaluru'));
     });
 
+    test('classifies Samanga card without confusing designation and company', () {
+      const ocr = '''
+Samanga Utilities
+Irene Kayaga
+Water Solutions Engineer
++256 704 916 489
+irene.kayaga@samangasolutions.com
+www.samangasolutions.com
+Plot 12 Bukoto Street, Kamwokya, Kampala''';
+
+      final result = parser.parse(ocr);
+
+      expect(result.name, 'Irene Kayaga');
+      expect(result.designation, 'Water Solutions Engineer');
+      expect(result.company, 'Samanga Utilities');
+      expect(result.email, 'irene.kayaga@samangasolutions.com');
+      expect(result.phone, '+256704916489');
+      expect(result.website, 'www.samangasolutions.com');
+    });
+
+    test('uses company-domain token overlap for CMG Minerals', () {
+      const ocr = '''
+JOSHUA KANYESIGYE, PMP
+Founder & CEO
+CMG MINERALS
++256 793 661 811
++256 793 193 951
+j.kanyesigye@cmgminerals.com
+www.cmgminerals.com''';
+
+      final result = parser.parse(ocr);
+
+      expect(result.name, 'Joshua Kanyesigye, PMP');
+      expect(result.company, 'CMG MINERALS');
+      expect(result.phones.length, 2);
+      expect(result.emails, contains('j.kanyesigye@cmgminerals.com'));
+    });
+
     test('never throws on empty or garbage input', () {
       expect(parser.parse('').isEmpty, isTrue);
       expect(parser.parse('   \n\n  ').isEmpty, isTrue);
