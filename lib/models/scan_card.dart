@@ -36,6 +36,10 @@ class ScanCard {
   String company;
   String email;
   String phone;
+  /// Preserve every OCR candidate even though the compact editor exposes
+  /// the primary email/phone fields individually.
+  List<String> emails = <String>[];
+  List<String> phones = <String>[];
   String website;
   String address;
   String notes;
@@ -64,15 +68,25 @@ class ScanCard {
     return trimmed.isEmpty ? null : trimmed;
   }
 
-  List<String> _nonEmptyList(String value) {
-    final trimmed = value.trim();
-    return trimmed.isEmpty ? <String>[] : <String>[trimmed];
+  List<String> _mergeContactValues(String primary, List<String> values) {
+    final result = <String>[];
+    for (final value in <String>[primary, ...values]) {
+      final trimmed = value.trim();
+      if (trimmed.isNotEmpty &&
+          !result.any((item) => item.toLowerCase() == trimmed.toLowerCase())) {
+        result.add(trimmed);
+      }
+    }
+    return result;
   }
 
   Map<String, dynamic> toJson() => {
     'person': {'name': _nonEmpty(name), 'designation': _nonEmpty(title)},
     'organization': {'name': _nonEmpty(company), 'website': _nonEmpty(website)},
-    'contact': {'emails': _nonEmptyList(email), 'phones': _nonEmptyList(phone)},
+    'contact': {
+      'emails': _mergeContactValues(email, emails),
+      'phones': _mergeContactValues(phone, phones),
+    },
     'location': {'full_address': _nonEmpty(address)},
     'notes': _nonEmpty(notes),
     'source': {
