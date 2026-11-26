@@ -567,9 +567,9 @@ class CardParser {
           .map((block) => block.lines
               .map((line) => line.text.trim())
               .where((line) => line.isNotEmpty)
-              .join('\\n'))
+              .join('\n'))
           .where((block) => block.isNotEmpty)
-          .join('\\n');
+          .join('\n');
       return blockText.isNotEmpty ? blockText : document.text;
     });
     return parseMany(texts);
