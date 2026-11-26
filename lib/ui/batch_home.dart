@@ -1065,13 +1065,13 @@ class _BatchHomeState extends State<BatchHome> {
           card.editedFields.add('company');
         }),
         field('email', 'Emails (comma separated)', card.emails.isEmpty ? card.email : card.emails.join(', '), (value) {
-          final values = value.split(RegExp(r'[,;\\n]')).map((v) => v.trim()).where((v) => v.isNotEmpty).toSet().toList();
+          final values = value.split(RegExp(r'[,;]')).map((v) => v.trim()).where((v) => v.isNotEmpty).toSet().toList();
           card.emails = values;
           card.email = values.isEmpty ? '' : values.first;
           card.editedFields.add('email');
         }),
         field('phone', 'Phone numbers (comma separated)', card.phones.isEmpty ? card.phone : card.phones.join(', '), (value) {
-          final values = value.split(RegExp(r'[,;\\n]')).map((v) => v.trim()).where((v) => v.isNotEmpty).toSet().toList();
+          final values = value.split(RegExp(r'[,;]')).map((v) => v.trim()).where((v) => v.isNotEmpty).toSet().toList();
           card.phones = values;
           card.phone = values.isEmpty ? '' : values.first;
           card.editedFields.add('phone');
