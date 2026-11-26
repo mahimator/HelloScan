@@ -1001,7 +1001,13 @@ class _BatchHomeState extends State<BatchHome> {
                   )
                 : ClipRRect(
                     borderRadius: BorderRadius.circular(9),
-                    child: Image.file(File(image.path), fit: BoxFit.cover),
+                    child: Image.file(
+                      File(image.path),
+                      fit: BoxFit.cover,
+                      cacheWidth: 360,
+                      cacheHeight: 240,
+                      filterQuality: FilterQuality.low,
+                    ),
                   ),
           ),
         ),
