@@ -16,6 +16,7 @@ dependencies:
   google_mlkit_text_recognition: ^1.0.3
   llamadart: ^0.20.8
   material_ui: ^1.11.1
+  shared_preferences: ^2.3.3
 
 dev_dependencies:
   flutter_test:

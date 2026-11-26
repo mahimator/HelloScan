@@ -1,15 +1,16 @@
 import 'dart:convert';
 
 import 'package:llamadart/llamadart.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/parsed_card.dart';
 
 /// Optional semantic correction for ambiguous person/company OCR candidates.
 ///
 /// The deterministic parser remains the source of truth for contact data.
-/// This model may only select text that already exists in the OCR transcript —
+/// This layer may only select text that already exists in the OCR transcript —
 /// it never invents, completes, or corrects words. A failure to download,
-/// load, or run the model returns [parsed] unchanged, so OCR is never blocked.
+/// load, or run the engine returns [parsed] unchanged, so OCR is never blocked.
 class SemanticCardRefiner {
   SemanticCardRefiner._();
 
@@ -22,10 +23,46 @@ class SemanticCardRefiner {
       'hf://unsloth/SmolLM2-135M-Instruct-GGUF/'
       'SmolLM2-135M-Instruct-Q4_K_M.gguf';
 
+  static const String _prefsEnabledKey = 'semantic_refiner.enabled';
+  static const String _prefsModelLoadedKey = 'semantic_refiner.model_loaded';
+
   LlamaEngine? _engine;
   Future<LlamaEngine>? _loading;
+  bool _enabled = true;
+  bool _modelLoaded = false;
 
+  /// Whether the neural semantic layer is enabled for OCR disambiguation.
+  bool get isEnabled => _enabled;
+
+  /// Whether the underlying engine is loaded and ready.
   bool get isLoaded => _engine != null;
+
+  /// Human-friendly corporate status for the neural layer.
+  String get statusLabel {
+    if (!_enabled) return 'Neural Semantic Engine: Standby';
+    if (_engine != null) return 'Neural Semantic Engine: Online';
+    if (_loading != null) return 'Neural Semantic Engine: Initializing…';
+    return _modelLoaded ? 'Neural Semantic Engine: Cached' : 'Neural Semantic Engine: Offline';
+  }
+
+  /// Color-ish status string for UI chips.
+  String get statusChip {
+    if (!_enabled) return 'standby';
+    if (_engine != null) return 'online';
+    return 'offline';
+  }
+
+  Future<void> loadPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    _enabled = prefs.getBool(_prefsEnabledKey) ?? true;
+    _modelLoaded = prefs.getBool(_prefsModelLoadedKey) ?? false;
+  }
+
+  Future<void> setEnabled(bool value) async {
+    _enabled = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefsEnabledKey, value);
+  }
 
   Future<LlamaEngine> _getEngine() {
     if (_engine != null) return Future.value(_engine!);
@@ -38,6 +75,10 @@ class SemanticCardRefiner {
         LlamaModel(ModelSource.parse(modelUri)),
       );
       _engine = engine;
+      _loading = null;
+      _modelLoaded = true;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_prefsModelLoadedKey, true);
       return engine;
     } catch (_) {
       _loading = null;
@@ -45,10 +86,19 @@ class SemanticCardRefiner {
     }
   }
 
+  /// Explicitly download and initialize the neural engine. Safe to call
+  /// multiple times; subsequent calls are no-ops once loaded.
+  Future<void> preloadModel() async {
+    if (_engine != null) return;
+    await _getEngine();
+  }
+
   /// Refines only the name/company pair. All other parsed fields are retained.
-  /// Skips inference entirely when the rule-based parser already has a clear,
-  /// corroborated company and plausible person name.
+  /// Skips inference entirely when disabled or when the rule-based parser
+  /// already has a clear, corroborated company and plausible person name.
   Future<ParsedCard> refine(ParsedCard parsed) async {
+    if (!_enabled) return parsed;
+
     final raw = parsed.rawText.trim();
     if (raw.isEmpty) return parsed;
 
@@ -115,7 +165,7 @@ ${jsonEncode(lines)}
         rawText: parsed.rawText,
       );
     } catch (_) {
-      // Model download, runtime, and generation failures must never block OCR.
+      // Engine failures must never block OCR.
       return parsed;
     }
   }
@@ -152,8 +202,8 @@ ${jsonEncode(lines)}
     for (final line in lines) {
       if (_normalize(line) == normalized) return value;
     }
-    // Permit a model to join adjacent logo lines, but never accept text that
-    // cannot be reconstructed from two neighboring OCR lines.
+    // Permit the engine to join adjacent logo lines, but never accept text
+    // that cannot be reconstructed from two neighboring OCR lines.
     for (var i = 0; i + 1 < lines.length; i++) {
       if (_normalize('${lines[i]} ${lines[i + 1]}') == normalized) {
         return value;

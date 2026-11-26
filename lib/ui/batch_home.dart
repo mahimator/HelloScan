@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/ocr_document.dart';
 import '../models/parsed_card.dart';
@@ -66,12 +67,40 @@ class _BatchHomeState extends State<BatchHome> {
   bool _bulkProcessing = false;
   int _bulkProcessed = 0;
 
+  /// Whether the Neural Semantic Engine is enabled.
+  bool _neuralEngineEnabled = true;
+
   @override
   void initState() {
     super.initState();
+    _initializeApp();
+  }
+
+  Future<void> _initializeApp() async {
+    await SemanticCardRefiner.instance.loadPrefs();
+    if (!mounted) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final onboarded = prefs.getBool('helloscan.onboarded') ?? false;
+
+    setState(() {
+      _neuralEngineEnabled = SemanticCardRefiner.instance.isEnabled;
+    });
+
     // Pre-warm the ML Kit model on startup so the first scan doesn't freeze
     // for ~30s while the recognition model downloads.
     _ocrService.prewarm().catchError((_) {});
+
+    // Kick off Neural Semantic Engine preload in the background if enabled.
+    if (_neuralEngineEnabled && !onboarded) {
+      SemanticCardRefiner.instance.preloadModel().catchError((_) {});
+    }
+
+    // Show onboarding on first launch.
+    if (!onboarded && mounted) {
+      await Future.delayed(const Duration(milliseconds: 500));
+      if (mounted) _showOnboarding();
+    }
   }
 
   @override
@@ -227,7 +256,27 @@ class _BatchHomeState extends State<BatchHome> {
       maxHeight: 2000,
     );
     if (images.isEmpty || !mounted) return;
+
+    if (_mode == _ScanMode.bulk) {
+      for (final image in images) {
+        final card = ScanCard(
+          id: 'card-${++_counter}',
+          front: image,
+          fastScan: _fastScan,
+        );
+        setState(() {
+          _cards.insert(0, card);
+          _selected = card;
+        });
+      }
+      _snack('${images.length} cards queued.');
+      return;
+    }
+
+    // Single mode: import each image as a card front, offer back-side import
+    // for two-sided cards.
     for (final image in images) {
+      if (!mounted) break;
       final card = ScanCard(
         id: 'card-${++_counter}',
         front: image,
@@ -237,15 +286,311 @@ class _BatchHomeState extends State<BatchHome> {
         _cards.insert(0, card);
         _selected = card;
       });
-      if (_mode == _ScanMode.bulk) {
-        // queue only
+
+      final isTwoSided = await _showCardTypeDialog();
+      if (!mounted) break;
+      if (isTwoSided) {
+        await _importBackInto(card);
       } else {
         await _extract(card);
       }
     }
-    if (_mode == _ScanMode.bulk) {
-      _snack('${images.length} cards queued.');
+  }
+
+  /// Imports the back side of a card from the gallery.
+  Future<void> _importBackInto(ScanCard card) async {
+    if (_isExtracting) {
+      _snack('Still reading the previous card. Please wait.');
+      return;
     }
+    final image = await _picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 90,
+      maxWidth: 2000,
+      maxHeight: 2000,
+    );
+    if (image == null || !mounted) return;
+    setState(() {
+      card.back = image;
+    });
+    await _extract(card);
+  }
+
+  /// Imports the back side of the currently selected card from the gallery.
+  Future<void> importSelectedBack() async {
+    if (_selected == null) {
+      _snack('Select a card first, then import its back.');
+      return;
+    }
+    await _importBackInto(_selected!);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Neural Semantic Engine management
+  // ---------------------------------------------------------------------------
+
+  Future<void> _showNeuralEngineDialog() async {
+    final refiner = SemanticCardRefiner.instance;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('helloscan.onboarded', true);
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.all(Radius.circular(16)),
+          ),
+          title: const Text(
+            'Neural Semantic Engine',
+            style: TextStyle(fontWeight: FontWeight.w700),
+          ),
+          content: SizedBox(
+            width: 360,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'The Neural Semantic Engine disambiguates person names from '
+                  'company names on noisy business cards. It runs entirely '
+                  'on-device and never sends your card data anywhere.',
+                  style: TextStyle(fontSize: 13, color: _kOnSurfaceVariant),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    const Text(
+                      'Status: ',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: refiner.isLoaded
+                            ? const Color(0xFFE8F0FE)
+                            : const Color(0xFFF5F5F5),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: refiner.isLoaded
+                              ? _kPrimary
+                              : const Color(0xFFDADCE0),
+                        ),
+                      ),
+                      child: Text(
+                        refiner.isLoaded ? 'ONLINE' : 'OFFLINE',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: refiner.isLoaded
+                              ? _kPrimary
+                              : _kOnSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                SwitchListTile(
+                  title: const Text('Enable Neural Semantic Layer'),
+                  subtitle: const Text(
+                    'When on, ambiguous names/companies are resolved using '
+                    'on-device AI. When off, rule-based parsing is used only.',
+                  ),
+                  value: refiner.isEnabled,
+                  onChanged: (value) async {
+                    await refiner.setEnabled(value);
+                    setDialogState(() {
+                      _neuralEngineEnabled = value;
+                    });
+                    if (value && !refiner.isLoaded) {
+                      refiner.preloadModel().catchError((_) {});
+                    }
+                    setState(() {});
+                  },
+                  activeThumbColor: _kPrimary,
+                ),
+                const SizedBox(height: 8),
+                if (!refiner.isLoaded && refiner.isEnabled) ...[
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.cloud_download, size: 18),
+                      label: const Text('Download Neural Engine'),
+                      onPressed: () async {
+                        Navigator.pop(ctx);
+                        await _downloadNeuralEngine();
+                      },
+                    ),
+                  ),
+                ],
+                if (refiner.isLoaded && refiner.isEnabled) ...[
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.refresh, size: 18),
+                      label: const Text('Reinitialize Neural Engine'),
+                      onPressed: () async {
+                        Navigator.pop(ctx);
+                        await refiner.preloadModel().catchError((_) {});
+                        setState(() {});
+                      },
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _downloadNeuralEngine() async {
+    if (!mounted) return;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(16)),
+        ),
+        title: Text('Downloading Neural Engine…'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 12),
+            Text(
+              'Fetching the on-device inference engine. This happens once.',
+              style: TextStyle(fontSize: 12, color: Color(0xFF5F6368)),
+            ),
+          ],
+        ),
+      ),
+    );
+    try {
+      await SemanticCardRefiner.instance.preloadModel();
+      if (mounted) {
+        Navigator.pop(context);
+        _snack('Neural Semantic Engine is now online.');
+        setState(() {});
+      }
+    } catch (_) {
+      if (mounted) {
+        Navigator.pop(context);
+        _snack(
+          'Could not initialize the Neural Engine. Card parsing still works.',
+        );
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // First-run onboarding
+  // ---------------------------------------------------------------------------
+
+  Future<void> _showOnboarding() async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(20)),
+        ),
+        titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
+        title: const Text(
+          'Welcome to HelloScan',
+          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 20),
+        ),
+        content: SizedBox(
+          width: 320,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: const [
+              Text(
+                'Turn visiting cards into CRM-ready contacts in three steps:',
+                style: TextStyle(fontSize: 14, color: Color(0xFF5F6368)),
+              ),
+              SizedBox(height: 16),
+              Row(
+                children: [
+                  Text('1', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1A73E8))),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Scan or import card fronts (and backs for two-sided cards).',
+                      style: TextStyle(fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(height: 12),
+              Row(
+                children: [
+                  Text('2', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1A73E8))),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Review each card — the Neural Semantic Engine helps separate names from companies.',
+                      style: TextStyle(fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(height: 12),
+              Row(
+                children: [
+                  Text('3', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1A73E8))),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Export the batch as CRM-ready JSON.',
+                      style: TextStyle(fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(height: 20),
+              Text(
+                'Tap the Neural Semantic Engine icon in the top bar to download '
+                'and manage the on-device AI layer.',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontStyle: FontStyle.italic,
+                  color: Color(0xFF5F6368),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: () async {
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.setBool('helloscan.onboarded', true);
+                if (mounted) Navigator.pop(ctx);
+              },
+              child: const Text('Get started'),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   void addEmpty() {
@@ -593,6 +938,25 @@ class _BatchHomeState extends State<BatchHome> {
             activeTrackColor: _kPrimaryContainer,
           ),
           const SizedBox(width: 8),
+          // Neural Semantic Engine status + management.
+          Tooltip(
+            message: 'Neural Semantic Engine — manage AI disambiguation layer',
+            child: IconButton(
+              icon: Icon(
+                _neuralEngineEnabled
+                    ? (SemanticCardRefiner.instance.isLoaded
+                        ? Icons.auto_awesome
+                        : Icons.auto_awesome_outlined)
+                    : Icons.auto_awesome_outlined,
+                color: SemanticCardRefiner.instance.isLoaded
+                    ? _kPrimary
+                    : _kOnSurfaceVariant,
+              ),
+              onPressed: _showNeuralEngineDialog,
+              tooltip: 'Neural Semantic Engine',
+            ),
+          ),
+          const SizedBox(width: 8),
           IconButton(
             onPressed: _cards.isEmpty ? null : exportBatch,
             icon: const Icon(Icons.file_download_outlined),
@@ -707,6 +1071,13 @@ class _BatchHomeState extends State<BatchHome> {
                         color: _kOnSurfaceVariant,
                         onPressed:
                             _selected == null || _isExtracting ? null : captureBack,
+                      ),
+                      _actionTile(
+                        icon: Icons.photo_library_outlined,
+                        label: 'Import back',
+                        color: _kOnSurfaceVariant,
+                        onPressed:
+                            _selected == null || _isExtracting ? null : importSelectedBack,
                       ),
                       _actionTile(
                         icon: Icons.photo_library_outlined,
