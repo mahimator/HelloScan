@@ -1,4 +1,5 @@
 import '../models/parsed_card.dart';
+import '../models/ocr_document.dart';
 
 /// Turns noisy OCR text from a visiting card into structured contact fields.
 ///
@@ -555,6 +556,23 @@ class CardParser {
       phones: phones,
       rawText: text,
     );
+  }
+
+  /// Parses structured OCR documents while preserving ML Kit's block and
+  /// line grouping. This prevents consumers from flattening all recognized
+  /// words into a single unstructured token stream before classification.
+  ParsedCard parseManyDocuments(Iterable<OcrDocument> documents) {
+    final texts = documents.map((document) {
+      final blockText = document.blocks
+          .map((block) => block.lines
+              .map((line) => line.text.trim())
+              .where((line) => line.isNotEmpty)
+              .join('\\n'))
+          .where((block) => block.isNotEmpty)
+          .join('\\n');
+      return blockText.isNotEmpty ? blockText : document.text;
+    });
+    return parseMany(texts);
   }
 
   /// Parses and merges multiple sides of the same card (front and back).
