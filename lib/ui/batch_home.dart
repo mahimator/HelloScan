@@ -390,6 +390,17 @@ class _BatchHomeState extends State<BatchHome> {
     apply('company', parsed.company, (value) => card.company = value);
     apply('email', parsed.email, (value) => card.email = value);
     apply('phone', parsed.phone, (value) => card.phone = value);
+
+    // Keep all detected values for CRM export, not only the first value shown
+    // in the compact single-line editor.
+    if (!card.editedFields.contains('email') && parsed.emails.isNotEmpty) {
+      card.emails = List<String>.from(parsed.emails);
+      changed = true;
+    }
+    if (!card.editedFields.contains('phone') && parsed.phones.isNotEmpty) {
+      card.phones = List<String>.from(parsed.phones);
+      changed = true;
+    }
     apply('website', parsed.website, (value) => card.website = value);
     apply('address', parsed.address, (value) => card.address = value);
 
