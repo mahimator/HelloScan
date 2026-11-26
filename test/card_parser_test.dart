@@ -75,6 +75,23 @@ john . doe @ example . com''');
       expect(result.email, 'john.doe@example.com');
     });
 
+    test('recognizes initials and surname-first name formats', () {
+      final examples = <String, String>{
+        'Madhav Prashant Trivedi': 'Madhav Prashant Trivedi',
+        'Madhav Trivedi': 'Madhav Trivedi',
+        'Trivedi Madhav': 'Trivedi Madhav',
+        'Trivedi Madhav Prashant': 'Trivedi Madhav Prashant',
+        'M.P. Trivedi': 'M.P. Trivedi',
+        'M P Trivedi': 'M P Trivedi',
+        'MADHAV P TRIVEDI': 'Madhav P Trivedi',
+      };
+
+      for (final entry in examples.entries) {
+        final parsed = parser.parse('${entry.key}\nFounder & Managing Director\nTrivedi Industries\n+256 700 123456');
+        expect(parsed.name, entry.value, reason: 'Input: ${entry.key}');
+      }
+    });
+
     test('does not extract email domain as company when no company line exists', () {
       final result = parser.parse('''
 Asha Rao
