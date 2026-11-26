@@ -140,6 +140,55 @@ Bengaluru 560102''';
       expect(result.address.toLowerCase(), contains('bengaluru'));
     });
 
+
+    test('extracts Samanga Utilities contact details', () {
+      final result = parser.parse('''
+samanga
+UTILITIES
+Irene Kayaga
+Water Solutions Engineer
++256 704 916 489
+irene.kayaga@samangasolutions.com
+www.samangasolutions.com
+Plot 12 Bukoto Street, Kamwokya, Kampala''');
+
+      expect(result.name, 'Irene Kayaga');
+      expect(result.designation, contains('Water Solutions Engineer'));
+      expect(result.company.toLowerCase(), contains('samanga'));
+      expect(result.emails, contains('irene.kayaga@samangasolutions.com'));
+      expect(result.phones, contains('+256704916489'));
+      expect(result.website, contains('samangasolutions.com'));
+      expect(result.address.toLowerCase(), contains('bukoto street'));
+    });
+
+    test('preserves multiple contacts when parsing both sides', () {
+      final result = parser.parseMany([
+        'Joshua Kanyesigye, PMP\\nFounder & CEO\\n+256 793 661 811\\nj.kanyesigye@cmgminerals.com\\nwww.cmgminerals.com',
+        'Tel: +256 793 193 951\\nMineral Project Development\\nPlot 1, Kampala',
+      ]);
+
+      expect(result.name, contains('Joshua Kanyesigye'));
+      expect(result.emails, contains('j.kanyesigye@cmgminerals.com'));
+      expect(result.phones, containsAll(['+256793661811', '+256793193951']));
+    });
+
+    test('does not mistake company names for people', () {
+      final result = parser.parse('''
+Equator Chocolate
+Artisanal single origin Ugandan chocolate
+Ele Jan Saaf
+Continuance Manager
++256-0778-211289 / +31-6-52636031
+info@chocolate.ug
+www.chocolate.ug
+P.O. Box 128039, Kampala, Uganda''');
+
+      expect(result.name, 'Ele Jan Saaf');
+      expect(result.company.toLowerCase(), contains('equator'));
+      expect(result.phones, hasLength(2));
+      expect(result.emails, contains('info@chocolate.ug'));
+    });
+
     test('never throws on empty or garbage input', () {
       expect(parser.parse('').isEmpty, isTrue);
       expect(parser.parse('   \n\n  ').isEmpty, isTrue);
