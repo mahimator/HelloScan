@@ -395,6 +395,87 @@ class _BatchHomeState extends State<BatchHome> {
                   ],
                 ),
                 const SizedBox(height: 12),
+                Row(
+                  children: [
+                    const Text(
+                      'Status: ',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: refiner.isLoaded
+                            ? const Color(0xFFE8F0FE)
+                            : const Color(0xFFF5F5F5),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: refiner.isLoaded
+                              ? _kPrimary
+                              : const Color(0xFFDADCE0),
+                        ),
+                      ),
+                      child: Text(
+                        refiner.isLoaded ? 'ONLINE' : 'OFFLINE',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: refiner.isLoaded
+                              ? _kPrimary
+                              : _kOnSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                if (refiner.isLoaded) ...[
+                  Row(
+                    children: [
+                      const Text(
+                        'Inferences: ',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
+                      ),
+                      Text(
+                        '${refiner.inferenceCount}',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: _kOnSurface,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Row(
+                    children: [
+                      const Text(
+                        'Last result: ',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
+                      ),
+                      Text(
+                        refiner.lastInferenceResult.replaceAll('_', ' ').toUpperCase(),
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: refiner.lastInferenceResult == 'ran'
+                              ? Colors.green
+                              : refiner.lastInferenceResult == 'low_confidence'
+                                  ? Colors.orange
+                                  : Colors.grey,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 12),
                 SwitchListTile(
                   title: const Text('Enable Neural Semantic Layer'),
                   subtitle: const Text(

@@ -1,6 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:llamadart/llamadart.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/parsed_card.dart';
@@ -9,27 +13,40 @@ import '../models/parsed_card.dart';
 ///
 /// The deterministic parser remains the source of truth for contact data.
 /// This layer may only select text that already exists in the OCR transcript —
-/// it never invents, completes, or corrects words. A failure to download,
-/// load, or run the engine returns [parsed] unchanged, so OCR is never blocked.
+/// it never invents, completes, or corrects words. A failure to load or run
+/// the engine returns [parsed] unchanged, so OCR is never blocked.
+///
+/// The GGUF model is bundled with the app as a Flutter asset and copied to the
+/// app's documents directory on first launch, so debug installs do not
+/// re-download ~100 MB from Hugging Face every time.
 class SemanticCardRefiner {
   SemanticCardRefiner._();
 
   static final SemanticCardRefiner instance = SemanticCardRefiner._();
 
-  /// SmolLM2-135M-Instruct Q4_K_M from Hugging Face. Small enough to run
-  /// on-device on entry-level phones, large enough to disambiguate names
-  /// from companies.
+  /// Hugging Face fallback URI (used only if the bundled asset is missing).
   static const String modelUri =
       'hf://unsloth/SmolLM2-135M-Instruct-GGUF/'
       'SmolLM2-135M-Instruct-Q4_K_M.gguf';
 
+  static const String _assetModelPath =
+      'assets/models/SmolLM2-135M-Instruct-Q4_K_M.gguf';
+  static const String _fileName =
+      'SmolLM2-135M-Instruct-Q4_K_M.gguf';
+
   static const String _prefsEnabledKey = 'semantic_refiner.enabled';
   static const String _prefsModelLoadedKey = 'semantic_refiner.model_loaded';
+  static const String _prefsInferenceCountKey =
+      'semantic_refiner.inference_count';
+  static const String _prefsLastInferenceKey =
+      'semantic_refiner.last_inference_result';
 
   LlamaEngine? _engine;
   Future<LlamaEngine>? _loading;
   bool _enabled = true;
   bool _modelLoaded = false;
+  int _inferenceCount = 0;
+  String _lastInferenceResult = 'not_run';
 
   /// Whether the neural semantic layer is enabled for OCR disambiguation.
   bool get isEnabled => _enabled;
@@ -37,10 +54,22 @@ class SemanticCardRefiner {
   /// Whether the underlying engine is loaded and ready.
   bool get isLoaded => _engine != null;
 
+  /// Total number of successful inference calls made.
+  int get inferenceCount => _inferenceCount;
+
+  /// Result of the last inference: 'ran', 'low_confidence', 'failed', or
+  /// 'not_run'.
+  String get lastInferenceResult => _lastInferenceResult;
+
   /// Human-friendly corporate status for the neural layer.
   String get statusLabel {
     if (!_enabled) return 'Neural Semantic Engine: Standby';
-    if (_engine != null) return 'Neural Semantic Engine: Online';
+    if (_engine != null) {
+      if (_inferenceCount > 0) {
+        return 'Neural Semantic Engine: Online ($_inferenceCount inference${_inferenceCount == 1 ? '' : 's'})';
+      }
+      return 'Neural Semantic Engine: Online';
+    }
     if (_loading != null) return 'Neural Semantic Engine: Initializing…';
     return _modelLoaded ? 'Neural Semantic Engine: Cached' : 'Neural Semantic Engine: Offline';
   }
@@ -56,12 +85,31 @@ class SemanticCardRefiner {
     final prefs = await SharedPreferences.getInstance();
     _enabled = prefs.getBool(_prefsEnabledKey) ?? true;
     _modelLoaded = prefs.getBool(_prefsModelLoadedKey) ?? false;
+    _inferenceCount = prefs.getInt(_prefsInferenceCountKey) ?? 0;
+    _lastInferenceResult = prefs.getString(_prefsLastInferenceKey) ?? 'not_run';
   }
 
   Future<void> setEnabled(bool value) async {
     _enabled = value;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_prefsEnabledKey, value);
+  }
+
+  /// Returns the local model path, copying from Flutter assets to the app's
+  /// documents directory on first launch. Returns null if the asset cannot be
+  /// resolved.
+  Future<String?> _localModelPath() async {
+    final dir = await getApplicationDocumentsDirectory();
+    final local = File('${dir.path}/$_fileName');
+    if (await local.exists()) return local.path;
+
+    try {
+      final data = await rootBundle.load(_assetModelPath);
+      await local.writeAsBytes(data.buffer.asUint8List(), flush: true);
+      return local.path;
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<LlamaEngine> _getEngine() {
@@ -71,7 +119,23 @@ class SemanticCardRefiner {
 
   Future<LlamaEngine> _loadEngine() async {
     try {
-      print('HelloScan: Neural engine loading model from Hugging Face…');
+      final localPath = await _localModelPath();
+      if (localPath != null) {
+        print('HelloScan: Loading bundled Neural Engine model from $localPath');
+        final engine = await LlamaEngine.load(
+          LlamaModel(ModelSource.path(localPath)),
+        );
+        _engine = engine;
+        _loading = null;
+        _modelLoaded = true;
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool(_prefsModelLoadedKey, true);
+        print('HelloScan: Neural Engine model loaded successfully (bundled)');
+        return engine;
+      }
+
+      // Fallback: download from Hugging Face.
+      print('HelloScan: Bundled model missing; downloading from Hugging Face…');
       final engine = await LlamaEngine.load(
         LlamaModel(ModelSource.parse(modelUri)),
       );
@@ -80,11 +144,11 @@ class SemanticCardRefiner {
       _modelLoaded = true;
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_prefsModelLoadedKey, true);
-      print('HelloScan: Neural engine model loaded successfully');
+      print('HelloScan: Neural Engine model loaded successfully (downloaded)');
       return engine;
     } catch (e) {
       _loading = null;
-      print('HelloScan: Neural engine load failed: $e');
+      print('HelloScan: Neural Engine load failed: $e');
       rethrow;
     }
   }
@@ -113,9 +177,9 @@ class SemanticCardRefiner {
     if (!needsReview) return parsed;
 
     try {
-      print('HelloScan: Neural engine starting inference…');
+      print('HelloScan: Neural Engine starting inference…');
       final engine = await _getEngine();
-      print('HelloScan: Neural engine loaded, running inference…');
+      print('HelloScan: Neural Engine loaded, running inference…');
       final lines = raw
           .split(RegExp(r'[\r\n]+'))
           .map((line) => line.trim())
@@ -151,15 +215,22 @@ ${jsonEncode(lines)}
         ),
       ).text();
 
-      print('HelloScan: Neural engine inference complete');
+      print('HelloScan: Neural Engine inference complete');
       final result = _decode(output);
       if (result == null || result.confidence < 0.55) {
-        print('HelloScan: Neural engine returned low confidence or null');
+        print('HelloScan: Neural Engine returned low confidence or null');
+        _lastInferenceResult = 'low_confidence';
+        _inferenceCount++;
+        await _persistStats();
         return parsed;
       }
 
       final refinedName = _verifiedSelection(result.personName, lines);
       final refinedCompany = _verifiedSelection(result.company, lines);
+
+      _lastInferenceResult = 'ran';
+      _inferenceCount++;
+      await _persistStats();
 
       return ParsedCard(
         name: refinedName ?? parsed.name,
@@ -174,10 +245,19 @@ ${jsonEncode(lines)}
         rawText: parsed.rawText,
       );
     } catch (e) {
+      print('HelloScan: Neural Engine inference failed: $e');
+      _lastInferenceResult = 'failed';
+      _inferenceCount++;
+      await _persistStats();
       // Engine failures must never block OCR.
-      print('HelloScan: Neural engine inference failed: $e');
       return parsed;
     }
+  }
+
+  Future<void> _persistStats() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_prefsInferenceCountKey, _inferenceCount);
+    await prefs.setString(_prefsLastInferenceKey, _lastInferenceResult);
   }
 
   _SemanticResult? _decode(String output) {
