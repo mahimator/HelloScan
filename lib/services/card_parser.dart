@@ -74,6 +74,12 @@ class CardParser {
     'to',
     'gg',
     'link',
+    'ug',
+    'ke',
+    'tz',
+    'rw',
+    'za',
+    'nl',
   };
 
   static const Set<String> _publicEmailDomains = <String>{
@@ -397,6 +403,22 @@ class CardParser {
     'exports',
     'imports',
     'enterprise',
+    // Common organization/industry descriptors. These are soft signals,
+    // never mandatory suffixes or hard proof that a line is a company.
+    'utilities',
+    'minerals',
+    'mining',
+    'chocolate',
+    'agriculture',
+    'manufacturing',
+    'foundation',
+    'university',
+    'hospital',
+    'bank',
+    'energy',
+    'resources',
+    'logistics',
+    'engineering',
   ];
 
   static const List<String> _addressKeywords = <String>[
@@ -1150,9 +1172,9 @@ class CardParser {
       if (words.any((word) => RegExp(r'^(?:[A-Za-z]\.?){1,3}$').hasMatch(word))) {
         score += 2;
       }
-      if (_companyKeywords.any((kw) => _hasKeyword(candidate.toLowerCase(), kw))) {
-        score -= 3;
-      }
+      // Do not penalize a role line merely because it also contains an
+      // organizational descriptor (e.g. "Water Solutions Engineer"). Strong
+      // role vocabulary should remain decisive.
       if (candidate == candidate.toUpperCase() &&
           RegExp(r'[A-Z]').hasMatch(candidate)) {
         score += 1;
