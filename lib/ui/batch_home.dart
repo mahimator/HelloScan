@@ -400,6 +400,12 @@ class _BatchHomeState extends State<BatchHome> {
     apply('company', parsed.company, (value) => card.company = value);
     apply('email', parsed.email, (value) => card.email = value);
     apply('phone', parsed.phone, (value) => card.phone = value);
+    if (!card.editedFields.contains('email') && parsed.emails.isNotEmpty) {
+      card.emails = List<String>.from(parsed.emails);
+    }
+    if (!card.editedFields.contains('phone') && parsed.phones.isNotEmpty) {
+      card.phones = List<String>.from(parsed.phones);
+    }
     apply('website', parsed.website, (value) => card.website = value);
     apply('address', parsed.address, (value) => card.address = value);
 
@@ -1058,12 +1064,16 @@ class _BatchHomeState extends State<BatchHome> {
           card.company = value;
           card.editedFields.add('company');
         }),
-        field('email', 'Email', card.email, (value) {
-          card.email = value;
+        field('email', 'Emails (comma separated)', card.emails.isEmpty ? card.email : card.emails.join(', '), (value) {
+          final values = value.split(RegExp(r'[,;\\n]')).map((v) => v.trim()).where((v) => v.isNotEmpty).toSet().toList();
+          card.emails = values;
+          card.email = values.isEmpty ? '' : values.first;
           card.editedFields.add('email');
         }),
-        field('phone', 'Phone', card.phone, (value) {
-          card.phone = value;
+        field('phone', 'Phone numbers (comma separated)', card.phones.isEmpty ? card.phone : card.phones.join(', '), (value) {
+          final values = value.split(RegExp(r'[,;\\n]')).map((v) => v.trim()).where((v) => v.isNotEmpty).toSet().toList();
+          card.phones = values;
+          card.phone = values.isEmpty ? '' : values.first;
           card.editedFields.add('phone');
         }),
         field('website', 'Website', card.website, (value) {
