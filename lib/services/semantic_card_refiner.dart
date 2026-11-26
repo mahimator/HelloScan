@@ -15,7 +15,7 @@ class SemanticCardRefiner {
 
   static const String modelUri =
       'hf://unsloth/SmolLM2-135M-Instruct-GGUF/'
-      'SmolLM2-135M-Instruct-Q2_K.gguf';
+      'SmolLM2-135M-Instruct-Q4_K_M.gguf';
 
   LlamaEngine? _engine;
   Future<LlamaEngine>? _loading;
@@ -49,6 +49,7 @@ class SemanticCardRefiner {
     // Avoid spending inference time when the rule-based parser has a clear,
     // corroborated company and a plausible person name.
     final needsReview = parsed.company.isEmpty ||
+        parsed.company.trim().split(RegExp(r'\\s+')).length == 1 ||
         parsed.name.isEmpty ||
         _looksLikeSloganOrInstruction(parsed.name) ||
         _looksLikeSloganOrInstruction(parsed.company);
