@@ -275,16 +275,16 @@ class _BatchHomeState extends State<BatchHome> {
       try {
         final texts = <String>[];
         if (card.front != null) {
-          texts.add(await _ocrService.recognize(
+          texts.add((await _ocrService.recognizeDocument(
             File(card.front!.path),
             fast: card.fastScan,
-          ));
+          )).text);
         }
         if (card.back != null) {
-          texts.add(await _ocrService.recognize(
+          texts.add((await _ocrService.recognizeDocument(
             File(card.back!.path),
             fast: card.fastScan,
-          ));
+          )).text);
         }
 
         final parsed = const CardParser().parseMany(texts);
@@ -335,16 +335,16 @@ class _BatchHomeState extends State<BatchHome> {
     try {
       final texts = <String>[];
       if (card.front != null) {
-        texts.add(await _ocrService.recognize(
+        texts.add((await _ocrService.recognizeDocument(
           File(card.front!.path),
           fast: card.fastScan,
-        ));
+        )).text);
       }
       if (card.back != null) {
-        texts.add(await _ocrService.recognize(
+        texts.add((await _ocrService.recognizeDocument(
           File(card.back!.path),
           fast: card.fastScan,
-        ));
+        )).text);
       }
 
       final parsed = const CardParser().parseMany(texts);
@@ -390,6 +390,21 @@ class _BatchHomeState extends State<BatchHome> {
     apply('company', parsed.company, (value) => card.company = value);
     apply('email', parsed.email, (value) => card.email = value);
     apply('phone', parsed.phone, (value) => card.phone = value);
+
+    // Keep every detected value for CRM export, even though the current editor
+    // exposes the primary email and phone as scalar fields.
+    if (!card.editedFields.contains('email')) {
+      card.emails
+        ..clear()
+        ..addAll(parsed.emails.isNotEmpty ? parsed.emails : [parsed.email]
+          ..where((value) => value.trim().isNotEmpty));
+    }
+    if (!card.editedFields.contains('phone')) {
+      card.phones
+        ..clear()
+        ..addAll(parsed.phones.isNotEmpty ? parsed.phones : [parsed.phone]
+          ..where((value) => value.trim().isNotEmpty));
+    }
     apply('website', parsed.website, (value) => card.website = value);
     apply('address', parsed.address, (value) => card.address = value);
 
