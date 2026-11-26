@@ -29,6 +29,23 @@ void main() {
       expect(contact['source']['review_status'], 'pending');
     });
 
+    test('exports every detected email and phone', () {
+      final card = ScanCard(
+        id: 'card-multi',
+        email: 'first@example.com',
+        phone: '+256700000001',
+        emails: ['first@example.com', 'second@example.com'],
+        phones: ['+256700000001', '+256700000002'],
+      );
+
+      final payload = const BatchExport().buildPayload([card]);
+      final contact = (payload['contacts'] as List).single as Map;
+      final details = contact['contact'] as Map;
+
+      expect(details['emails'], ['first@example.com', 'second@example.com']);
+      expect(details['phones'], ['+256700000001', '+256700000002']);
+    });
+
     test('encodes pretty, valid JSON', () {
       final json = const BatchExport().encode(
         <ScanCard>[],
