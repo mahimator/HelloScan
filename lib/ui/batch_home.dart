@@ -68,7 +68,8 @@ class _BatchHomeState extends State<BatchHome> {
   int _bulkProcessed = 0;
 
   /// Whether the Neural Semantic Engine is enabled.
-  bool _neuralEngineEnabled = true;
+  /// Disabled by default — deterministic rule-based parser is the source of truth.
+  bool _neuralEngineEnabled = false;
 
   @override
   void initState() {

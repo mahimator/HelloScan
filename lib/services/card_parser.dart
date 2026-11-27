@@ -864,6 +864,13 @@ class CardParser {
       if (_urlPattern.hasMatch(line)) continue;
 
       final lower = line.toLowerCase();
+
+      // Skip designation lines — they're job titles, not addresses.
+      if (_designationKeywords.any((kw) => _hasKeyword(lower, kw))) continue;
+
+      // Skip likely person names.
+      if (_isLikelyName(line)) continue;
+
       final hasKeyword = _addressKeywords.any(
         (keyword) => _hasKeyword(lower, keyword),
       );
@@ -878,22 +885,51 @@ class CardParser {
           (RegExp(r'\b\d{5,6}\b').hasMatch(line) ||
               _addressKeywords.any((kw) => _hasKeyword(lower, kw)));
 
-      if (hasKeyword || startsWithNumber || pinLike || cityStateLike) {
+      // Also catch lines that look like address continuations:
+      // contain a comma followed by city/state/pin patterns, or
+      // contain building/unit/floor/block indicators.
+      final looksLikeAddressContinuation =
+          RegExp(r',\s*[A-Za-z]{3,}').hasMatch(line) ||
+          RegExp(r'\b(?:unit|apt|apartment|flat|room|block|tower|building|sector|phase|colony|nagar)\b', caseSensitive: false).hasMatch(lower);
+
+      if (hasKeyword || startsWithNumber || pinLike || cityStateLike || looksLikeAddressContinuation) {
         addressLines.add(line.trim());
-        // OCR often splits an address across two lines (street / city-pin).
-        // Grab the next line if it looks like a continuation and hasn't been
-        // claimed as a phone, email or website.
-        if (i + 1 < lines.length) {
-          final next = lines[i + 1];
-          if (!_looksLikePhoneLine(next, phones) &&
-              !next.contains('@') &&
-              !_urlPattern.hasMatch(next) &&
-              !_designationKeywords.any((kw) =>
-                  _hasKeyword(next.toLowerCase(), kw)) &&
-              RegExp(r'[A-Za-z]').hasMatch(next)) {
+
+        // Grab subsequent lines that look like address continuations
+        // (city, state, pin, country on following lines).
+        var j = i + 1;
+        while (j < lines.length) {
+          final next = lines[j];
+          final nextLower = next.toLowerCase();
+          if (_looksLikePhoneLine(next, phones)) break;
+          if (next.contains('@')) break;
+          if (_urlPattern.hasMatch(next)) break;
+          if (_designationKeywords.any((kw) => _hasKeyword(nextLower, kw))) break;
+          if (_isLikelyName(next)) break;
+
+          final nextHasKeyword = _addressKeywords.any(
+            (kw) => _hasKeyword(nextLower, kw),
+          );
+          final nextStartsWithNumber =
+              RegExp(r'^\s*\d{1,6}[\s,/\-]').hasMatch(next) &&
+              RegExp(r'[A-Za-z]{3,}').hasMatch(next);
+          final nextPinLike =
+              RegExp(r'\b\d{5,6}\b').hasMatch(next) &&
+              RegExp(r'[A-Za-z]').hasMatch(next);
+          final nextCityStateLike =
+              RegExp(r'\b[A-Za-z]{3,}\b').hasMatch(next) &&
+              (RegExp(r'\b\d{5,6}\b').hasMatch(next) ||
+                  _addressKeywords.any((kw) => _hasKeyword(nextLower, kw)));
+
+          if (nextHasKeyword || nextStartsWithNumber || nextPinLike || nextCityStateLike ||
+              RegExp(r',\s*[A-Za-z]{3,}').hasMatch(next)) {
             addressLines.add(next.trim());
+            j++;
+          } else {
+            break;
           }
         }
+        i = j - 1; // skip past the lines we already consumed
       }
     }
 

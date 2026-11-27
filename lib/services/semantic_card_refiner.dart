@@ -84,7 +84,7 @@ class SemanticCardRefiner {
 
   Future<void> loadPrefs() async {
     final prefs = await SharedPreferences.getInstance();
-    _enabled = prefs.getBool(_prefsEnabledKey) ?? true;
+    _enabled = prefs.getBool(_prefsEnabledKey) ?? false;
     _modelLoaded = prefs.getBool(_prefsModelLoadedKey) ?? false;
     _inferenceCount = prefs.getInt(_prefsInferenceCountKey) ?? 0;
     _lastInferenceResult = prefs.getString(_prefsLastInferenceKey) ?? 'not_run';
