@@ -44,6 +44,10 @@ class ScanCard {
   String address;
   String notes;
 
+  /// Raw OCR text as returned by the recognizer — shown when parsing fails
+  /// so the user can see what was (or wasn't) read.
+  String rawOcrText = '';
+
   /// User has explicitly confirmed the card contents.
   bool reviewed = false;
 

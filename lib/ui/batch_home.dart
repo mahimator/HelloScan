@@ -751,9 +751,12 @@ class _BatchHomeState extends State<BatchHome> {
         if (_openRouterEnabled && OpenRouterOcrService.instance.hasApiKey) {
           // OpenRouter cloud parsing path.
           final rawText = documents.map((d) => d.text).join('\n');
+          card.rawOcrText = rawText;
           parsed = await OpenRouterOcrService.instance.parse(rawText);
         } else {
           // Local deterministic parsing path.
+          final rawText = documents.map((d) => d.text).join('\n');
+          card.rawOcrText = rawText;
           parsed = await SemanticCardRefiner.instance.refine(
             const CardParser().parseManyDocuments(documents),
           );
@@ -821,9 +824,12 @@ class _BatchHomeState extends State<BatchHome> {
       if (_openRouterEnabled && OpenRouterOcrService.instance.hasApiKey) {
         // OpenRouter cloud parsing path — sends raw OCR text to OpenRouter.
         final rawText = documents.map((d) => d.text).join('\n');
+        card.rawOcrText = rawText;
         parsed = await OpenRouterOcrService.instance.parse(rawText);
       } else {
         // Local deterministic parsing path.
+        final rawText = documents.map((d) => d.text).join('\n');
+        card.rawOcrText = rawText;
         parsed = await SemanticCardRefiner.instance.refine(
           const CardParser().parseManyDocuments(documents),
         );
@@ -840,7 +846,9 @@ class _BatchHomeState extends State<BatchHome> {
 
       if (parsed.isEmpty) {
         _snack(
-          'No text detected. Try better lighting or enter details manually.',
+          card.rawOcrText.trim().isNotEmpty
+              ? 'OCR read text but found no contact fields. Raw text: "${card.rawOcrText.substring(0, card.rawOcrText.length.clamp(0, 100))}"'
+              : 'No text detected. Try better lighting or enter details manually.',
         );
       }
     } catch (e, stack) {
@@ -1692,21 +1700,48 @@ class _BatchHomeState extends State<BatchHome> {
       );
     }
     if (card.ocrFailed == true) {
-      return const Padding(
+      return Padding(
         padding: EdgeInsets.only(bottom: 10),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.error_outline, size: 16, color: Colors.red),
-            SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                'No text detected. Improve lighting or enter details manually.',
-                style: TextStyle(
-                  color: Colors.red,
-                  fontSize: 12,
+            Row(
+              children: [
+                Icon(Icons.error_outline, size: 16, color: Colors.red),
+                SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    card.rawOcrText.trim().isNotEmpty
+                        ? 'OCR read text but found no contact fields.'
+                        : 'No text detected. Improve lighting or enter details manually.',
+                    style: TextStyle(
+                      color: Colors.red,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (card.rawOcrText.trim().isNotEmpty) ...[
+              SizedBox(height: 6),
+              Container(
+                width: double.infinity,
+                padding: EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Color(0xFFF5F5F5),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Color(0xFFDADCE0)),
+                ),
+                child: Text(
+                  'Raw OCR: "${card.rawOcrText.substring(0, card.rawOcrText.length.clamp(0, 200))}"',
+                  style: TextStyle(
+                    color: _kOnSurfaceVariant,
+                    fontSize: 10,
+                    fontFamily: 'monospace',
+                  ),
                 ),
               ),
-            ),
+            ],
           ],
         ),
       );

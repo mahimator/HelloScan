@@ -35,44 +35,113 @@ class MlKitOcrService implements OcrService {
   @override
   Future<OcrDocument> recognizeDocument(File image, {bool fast = false}) async {
     final bytes = await image.readAsBytes();
+    final originalExt = image.path.split('.').last.toLowerCase();
 
-    // The enhancer caps the long edge before ML Kit sees the image. Running
-    // it in a worker isolate avoids blocking animation and touch handling.
-    final enhanced = await compute(enhanceInIsolate, <Object>[bytes, fast]);
-    final directory = await getTemporaryDirectory();
-    final temp = File(
-      '${directory.path}/helloscan_ocr_${DateTime.now().microsecondsSinceEpoch}.jpg',
-    );
+    print('HelloScan OCR: input=${image.path} ext=$originalExt size=${bytes.length}');
+
+    // Try enhanced image first, fall back to raw if it produces no text.
+    String? enhancedText;
+    List<OcrBlock>? enhancedBlocks;
 
     try {
-      await temp.writeAsBytes(enhanced, flush: false);
-      final recognized = await _engine.processImage(
-        InputImage.fromFilePath(temp.path),
+      // The enhancer caps the long edge before ML Kit sees the image.
+      // Running it in a worker isolate avoids blocking animation and touch handling.
+      final enhancedBytes = await compute(enhanceInIsolate, <Object>[bytes, fast]);
+
+      // If the input was HEIC and the enhancer couldn't decode it, it returns
+      // raw HEIC bytes. ML Kit can't read HEIC from a .jpg file, so convert
+      // to JPEG if possible, otherwise use the original extension.
+      final ext = _isHeic(originalExt) ? 'jpg' : originalExt;
+      final directory = await getTemporaryDirectory();
+      final temp = File(
+        '${directory.path}/helloscan_ocr_${DateTime.now().microsecondsSinceEpoch}.$ext',
       );
 
-      final blocks = recognized.blocks.map((block) {
-        final lines = block.lines.map((line) {
-          final rect = line.boundingBox;
-          return OcrLine(
-            text: line.text,
-            left: rect.left.round(),
-            top: rect.top.round(),
-            right: rect.right.round(),
-            bottom: rect.bottom.round(),
-          );
-        }).toList(growable: false);
-        return OcrBlock(text: block.text, lines: lines);
-      }).toList(growable: false);
-
-      return OcrDocument(text: recognized.text, blocks: blocks);
-    } finally {
-      // Delete promptly: bulk scanning must not accumulate temporary images.
       try {
-        if (await temp.exists()) await temp.delete();
-      } catch (_) {
-        // Best-effort cleanup.
+        await temp.writeAsBytes(enhancedBytes, flush: false);
+        final recognized = await _engine.processImage(
+          InputImage.fromFilePath(temp.path),
+        );
+
+        enhancedText = recognized.text;
+        enhancedBlocks = recognized.blocks.map((block) {
+          final lines = block.lines.map((line) {
+            final rect = line.boundingBox;
+            return OcrLine(
+              text: line.text,
+              left: rect.left.round(),
+              top: rect.top.round(),
+              right: rect.right.round(),
+              bottom: rect.bottom.round(),
+            );
+          }).toList(growable: false);
+          return OcrBlock(text: block.text, lines: lines);
+        }).toList(growable: false);
+
+        print('HelloScan OCR: enhanced text="${enhancedText?.substring(0, enhancedText!.length.clamp(0, 200))}"');
+      } finally {
+        try {
+          if (await temp.exists()) await temp.delete();
+        } catch (_) {
+          // Best-effort cleanup.
+        }
+      }
+    } catch (e) {
+      print('HelloScan OCR: enhanced OCR failed: $e');
+    }
+
+    // If enhanced OCR produced nothing, try the original raw image as fallback.
+    if ((enhancedText ?? '').trim().isEmpty) {
+      print('HelloScan OCR: enhanced produced no text, trying original image…');
+      try {
+        final directory = await getTemporaryDirectory();
+        final temp = File(
+          '${directory.path}/helloscan_ocr_orig_${DateTime.now().microsecondsSinceEpoch}.$originalExt',
+        );
+        try {
+          await temp.writeAsBytes(bytes, flush: false);
+          final recognized = await _engine.processImage(
+            InputImage.fromFilePath(temp.path),
+          );
+          if ((recognized.text ?? '').trim().isNotEmpty) {
+            enhancedText = recognized.text;
+            enhancedBlocks = recognized.blocks.map((block) {
+              final lines = block.lines.map((line) {
+                final rect = line.boundingBox;
+                return OcrLine(
+                  text: line.text,
+                  left: rect.left.round(),
+                  top: rect.top.round(),
+                  right: rect.right.round(),
+                  bottom: rect.bottom.round(),
+                );
+              }).toList(growable: false);
+              return OcrBlock(text: block.text, lines: lines);
+            }).toList(growable: false);
+            print('HelloScan OCR: original text="${recognized.text?.substring(0, recognized.text!.length.clamp(0, 200))}"');
+          } else {
+            print('HelloScan OCR: original also produced no text');
+          }
+        } finally {
+          try {
+            if (await temp.exists()) await temp.delete();
+          } catch (_) {
+            // Best-effort cleanup.
+          }
+        }
+      } catch (e) {
+        print('HelloScan OCR: original OCR failed: $e');
       }
     }
+
+    return OcrDocument(
+      text: enhancedText ?? '',
+      blocks: enhancedBlocks ?? const <OcrBlock>[],
+    );
+  }
+
+  bool _isHeic(String ext) {
+    return ext == 'heic' || ext == 'heif';
   }
 
   @override
