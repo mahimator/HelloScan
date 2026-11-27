@@ -94,6 +94,23 @@ San Francisco, CA 94105''';
       expect(result.detectedCount, greaterThanOrEqualTo(6));
     });
 
+    test('Equator Chocolate is name not company', () {
+      // "Chocolate" is a company keyword but "Equator Chocolate" is a person's
+      // name — it must not be classified as company.
+      const ocr = '''
+Equator Chocolate
++1 234 567 8900''';
+
+      final result = parser.parse(ocr);
+
+      print('Equator Chocolate result:');
+      print('  name: ${result.name}');
+      print('  company: ${result.company}');
+
+      expect(result.name, 'Equator Chocolate');
+      expect(result.company, isEmpty);
+    });
+
     test('JSON export matches schema', () async {
       // Verify the schema is valid JSON
       final schemaFile = File('schemas/contact-batch-v1.schema.json');

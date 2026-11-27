@@ -1052,6 +1052,17 @@ class CardParser {
       );
       if (isDesignation) continue;
 
+      // A person's name is never a company — unless it has a legal company
+      // suffix (Inc, Ltd, Corp, etc.) or is corroborated by a website/email
+      // domain. "Equator Chocolate" is a person's name; "Acme Corp" is a
+      // company.
+      if (_isLikelyName(candidate) && !_hasLegalCompanySuffix(candidate)) {
+        final hasDomainMatch = rootLabels.any(
+          (root) => _domainMatches(candidate, root),
+        );
+        if (!hasDomainMatch) continue;
+      }
+
       var score = 0;
 
       // --- Company suffixes score positively -------------------------------
@@ -1117,6 +1128,33 @@ class CardParser {
 
   int wordsCount(String value) {
     return value.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
+  }
+
+  /// True only when the candidate ends with a legal entity suffix
+  /// (Inc, Ltd, LLC, Corp, etc.) — not industry words like "Chocolate" or
+  /// "Solutions" which could also be part of a person's name.
+  bool _hasLegalCompanySuffix(String value) {
+    return RegExp(
+      r'(?:^|[\s,])(?:'
+      r'pvt\.?\s*(?:ltd\.?|limited)|private\s+limited|'
+      r'public\s+limited|'
+      r'ltd\.?|limited|'
+      r'llc|l\.l\.c\.|'
+      r'inc\.?|incorporated|'
+      r'corp\.?|corporation|'
+      r'company|co\.|'
+      r'llp|plc|'
+      r'gmbh|ag|'
+      r'pty\s*ltd\.?|'
+      r'pte\.?\s*ltd\.?|'
+      r'sdn\.?\s*bhd\.?|'
+      r'bv|nv|'
+      r's\.a\.?|s\.r\.l\.?|srl|s\.p\.a\.?|'
+      r'sas|s\.a\.s\.?|sro|oy|ab|'
+      r'fz-llc|fze|fzco'
+      r')\s*\.?$',
+      caseSensitive: false,
+    ).hasMatch(value.trim());
   }
 
   bool _domainMatches(String candidate, String rootLabel) {
