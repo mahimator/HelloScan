@@ -54,6 +54,31 @@ class _BatchHomeState extends State<BatchHome> {
     return _ocr!;
   }
 
+  /// Controllers for editor fields, keyed by "cardId-fieldName".
+  /// Ensures OCR-parsed values are reliably pushed into the UI text fields.
+  final Map<String, TextEditingController> _fieldControllers = {};
+
+  TextEditingController _controllerFor(String cardId, String fieldName) {
+    final key = '$cardId-$fieldName';
+    return _fieldControllers.putIfAbsent(key, () => TextEditingController());
+  }
+
+  /// Sync all controller texts with the current card values.
+  void _syncControllers(ScanCard card) {
+    _controllerFor(card.id, 'name').text = card.name;
+    _controllerFor(card.id, 'title').text = card.title;
+    _controllerFor(card.id, 'company').text = card.company;
+    _controllerFor(card.id, 'email').text = card.email.isEmpty
+        ? (card.emails.isNotEmpty ? card.emails.first : '')
+        : card.email;
+    _controllerFor(card.id, 'phone').text = card.phone.isEmpty
+        ? (card.phones.isNotEmpty ? card.phones.first : '')
+        : card.phone;
+    _controllerFor(card.id, 'website').text = card.website;
+    _controllerFor(card.id, 'address').text = card.address;
+    _controllerFor(card.id, 'notes').text = card.notes;
+  }
+
   _ScanMode _mode = _ScanMode.single;
 
   /// When true, skips image enhancement for faster (lower-quality) OCR.
@@ -110,6 +135,10 @@ class _BatchHomeState extends State<BatchHome> {
   @override
   void dispose() {
     if (_ownsOcr) _ocr?.dispose();
+    for (final controller in _fieldControllers.values) {
+      controller.dispose();
+    }
+    _fieldControllers.clear();
     super.dispose();
   }
 
@@ -889,6 +918,7 @@ class _BatchHomeState extends State<BatchHome> {
     apply('address', parsed.address, (value) => card.address = value);
 
     if (changed) card.revision++;
+    _syncControllers(card);
   }
 
   // ---------------------------------------------------------------------------
@@ -1006,6 +1036,11 @@ class _BatchHomeState extends State<BatchHome> {
         _cards.clear();
         _selected = null;
       });
+      // Dispose all controllers
+      for (final controller in _fieldControllers.values) {
+        controller.dispose();
+      }
+      _fieldControllers.clear();
       _snack('Batch cleared');
     }
   }
@@ -1016,6 +1051,14 @@ class _BatchHomeState extends State<BatchHome> {
       if (_selected == card) {
         _selected = _cards.isEmpty ? null : _cards.first;
       }
+    });
+    // Dispose controllers for removed card
+    _fieldControllers.removeWhere((key, controller) {
+      if (key.startsWith('${card.id}-')) {
+        controller.dispose();
+        return true;
+      }
+      return false;
     });
   }
 
@@ -1530,6 +1573,11 @@ class _BatchHomeState extends State<BatchHome> {
       String value,
       void Function(String) onChanged,
     ) {
+      final controller = _controllerFor(card.id, keyName);
+      // Sync controller with model value if they differ (e.g. after OCR parse)
+      if (controller.text != value) {
+        controller.text = value;
+      }
       return Padding(
         padding: const EdgeInsets.only(bottom: 12),
         child: Column(
@@ -1545,8 +1593,7 @@ class _BatchHomeState extends State<BatchHome> {
             ),
             const SizedBox(height: 6),
             TextFormField(
-              key: ValueKey('${card.id}-${card.revision}-$keyName'),
-              initialValue: value,
+              controller: controller,
               decoration: const InputDecoration(
                 border: OutlineInputBorder(),
                 contentPadding: EdgeInsets.symmetric(
@@ -1554,7 +1601,10 @@ class _BatchHomeState extends State<BatchHome> {
                   vertical: 10,
                 ),
               ),
-              onChanged: onChanged,
+              onChanged: (val) {
+                controller.text = val;
+                onChanged(val);
+              },
             ),
           ],
         ),
