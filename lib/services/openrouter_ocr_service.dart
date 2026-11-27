@@ -36,9 +36,38 @@ class OpenRouterOcrService {
   bool get hasApiKey => _apiKey != null && _apiKey!.trim().isNotEmpty;
 
   Future<void> loadPrefs() async {
+    // First check for a locally-baked API key in lib/secrets.dart (gitignored,
+    // never committed to the repo).
+    final localKey = await _loadLocalApiKey();
+    if (localKey != null && localKey.trim().isNotEmpty) {
+      _apiKey = localKey.trim();
+    }
+
     final prefs = await SharedPreferences.getInstance();
-    _apiKey = prefs.getString(_prefsApiKeyKey);
+    if (_apiKey == null) {
+      _apiKey = prefs.getString(_prefsApiKeyKey);
+    }
     _enabled = prefs.getBool(_prefsEnabledKey) ?? false;
+  }
+
+  /// Reads the OpenRouter API key from lib/secrets.dart at runtime.
+  ///
+  /// This file is gitignored and never committed. Create it by copying
+  /// lib/secrets.dart.template and replacing the placeholder with your key.
+  static Future<String?> _loadLocalApiKey() async {
+    try {
+      final file = File('lib/secrets.dart');
+      if (await file.exists()) {
+        final content = await file.readAsString();
+        final match = RegExp(
+          "openRouterApiKey\\s*=\\s*[\\\"']([^\\\"']+)[\\\"']",
+        ).firstMatch(content);
+        return match?.group(1);
+      }
+    } catch (_) {
+      // Best-effort only; if the file can't be read, we just have no key.
+    }
+    return null;
   }
 
   Future<void> setApiKey(String key) async {

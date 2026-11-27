@@ -22,5 +22,8 @@ android/gradle/wrapper/gradle-wrapper.jar
 *.jks
 release/
 
-# Bundled neural engine model (large binary — downloaded separately, not in repo)
+# Local secrets — contains your OpenRouter API key, never committed
+lib/secrets.dart
+
+# Bundled neural engine model (large binary — not in repo)
 assets/models/*.gguf
