@@ -15,6 +15,7 @@ import '../services/card_parser.dart';
 import '../services/semantic_card_refiner.dart';
 import '../services/mlkit_ocr_service.dart';
 import '../services/ocr_service.dart';
+import '../services/openrouter_ocr_service.dart';
 
 const _kPrimary = Color(0xFF1A73E8);
 const _kPrimaryContainer = Color(0xFFE8F0FE);
@@ -71,6 +72,9 @@ class _BatchHomeState extends State<BatchHome> {
   /// Disabled by default — deterministic rule-based parser is the source of truth.
   bool _neuralEngineEnabled = false;
 
+  /// Whether OpenRouter cloud parsing is enabled.
+  bool _openRouterEnabled = false;
+
   @override
   void initState() {
     super.initState();
@@ -79,6 +83,7 @@ class _BatchHomeState extends State<BatchHome> {
 
   Future<void> _initializeApp() async {
     await SemanticCardRefiner.instance.loadPrefs();
+    await OpenRouterOcrService.instance.loadPrefs();
     if (!mounted) return;
 
     final prefs = await SharedPreferences.getInstance();
@@ -86,6 +91,7 @@ class _BatchHomeState extends State<BatchHome> {
 
     setState(() {
       _neuralEngineEnabled = SemanticCardRefiner.instance.isEnabled;
+      _openRouterEnabled = OpenRouterOcrService.instance.isEnabled;
     });
 
     // Pre-warm the ML Kit model on startup so the first scan doesn't freeze
@@ -344,55 +350,72 @@ class _BatchHomeState extends State<BatchHome> {
             style: TextStyle(fontWeight: FontWeight.w700),
           ),
           content: SizedBox(
-            width: 360,
+            width: 380,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // ------------------------------------------------------------------
+                // OpenRouter cloud parsing
+                // ------------------------------------------------------------------
                 const Text(
-                  'The Neural Semantic Engine disambiguates person names from '
-                  'company names on noisy business cards. It runs entirely '
-                  'on-device and never sends your card data anywhere.',
-                  style: TextStyle(fontSize: 13, color: _kOnSurfaceVariant),
+                  'OpenRouter Cloud Parsing',
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
                 ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    const Text(
-                      'Status: ',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: refiner.isLoaded
-                            ? const Color(0xFFE8F0FE)
-                            : const Color(0xFFF5F5F5),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                          color: refiner.isLoaded
-                              ? _kPrimary
-                              : const Color(0xFFDADCE0),
-                        ),
-                      ),
-                      child: Text(
-                        refiner.isLoaded ? 'ONLINE' : 'OFFLINE',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          color: refiner.isLoaded
-                              ? _kPrimary
-                              : _kOnSurfaceVariant,
-                        ),
-                      ),
-                    ),
-                  ],
+                const SizedBox(height: 6),
+                const Text(
+                  'Send OCR text to OpenRouter for contact extraction. '
+                  'Uses your API key; card text leaves the device.',
+                  style: TextStyle(fontSize: 12, color: _kOnSurfaceVariant),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
+                TextField(
+                  key: const Key('openrouter-api-key'),
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'OpenRouter API Key',
+                    hintText: 'sk-or-v1-...',
+                    border: OutlineInputBorder(),
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 12,
+                    ),
+                  ),
+                  onChanged: (value) async {
+                    await OpenRouterOcrService.instance.setApiKey(value);
+                  },
+                ),
+                const SizedBox(height: 8),
+                SwitchListTile(
+                  title: const Text('Enable OpenRouter Parsing'),
+                  subtitle: const Text(
+                    'When on, OCR text is sent to OpenRouter instead of local parsing.',
+                  ),
+                  value: _openRouterEnabled,
+                  onChanged: (value) async {
+                    await OpenRouterOcrService.instance.setEnabled(value);
+                    setDialogState(() {
+                      _openRouterEnabled = value;
+                    });
+                    setState(() {});
+                  },
+                  activeThumbColor: _kPrimary,
+                ),
+                const Divider(height: 24),
+
+                // ------------------------------------------------------------------
+                // Neural Semantic Engine (on-device)
+                // ------------------------------------------------------------------
+                const Text(
+                  'Neural Semantic Engine',
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Disambiguates person names from company names on noisy cards. '
+                  'Runs entirely on-device; card data never leaves the device.',
+                  style: TextStyle(fontSize: 12, color: _kOnSurfaceVariant),
+                ),
+                const SizedBox(height: 10),
                 Row(
                   children: [
                     const Text(
@@ -486,6 +509,9 @@ class _BatchHomeState extends State<BatchHome> {
                     setDialogState(() {
                       _neuralEngineEnabled = value;
                     });
+                    if (value && !refiner.isLoaded) {
+                      refiner.preloadModel().catchError((_) {});
+                    }
                     setState(() {});
                   },
                   activeThumbColor: _kPrimary,
@@ -721,9 +747,17 @@ class _BatchHomeState extends State<BatchHome> {
           ));
         }
 
-        final parsed = await SemanticCardRefiner.instance.refine(
-          const CardParser().parseManyDocuments(documents),
-        );
+        ParsedCard parsed;
+        if (_openRouterEnabled && OpenRouterOcrService.instance.hasApiKey) {
+          // OpenRouter cloud parsing path.
+          final rawText = documents.map((d) => d.text).join('\n');
+          parsed = await OpenRouterOcrService.instance.parse(rawText);
+        } else {
+          // Local deterministic parsing path.
+          parsed = await SemanticCardRefiner.instance.refine(
+            const CardParser().parseManyDocuments(documents),
+          );
+        }
         if (!mounted) break;
 
         setState(() {
@@ -783,9 +817,17 @@ class _BatchHomeState extends State<BatchHome> {
         ));
       }
 
-      final parsed = await SemanticCardRefiner.instance.refine(
-        const CardParser().parseManyDocuments(documents),
-      );
+      ParsedCard parsed;
+      if (_openRouterEnabled && OpenRouterOcrService.instance.hasApiKey) {
+        // OpenRouter cloud parsing path — sends raw OCR text to OpenRouter.
+        final rawText = documents.map((d) => d.text).join('\n');
+        parsed = await OpenRouterOcrService.instance.parse(rawText);
+      } else {
+        // Local deterministic parsing path.
+        parsed = await SemanticCardRefiner.instance.refine(
+          const CardParser().parseManyDocuments(documents),
+        );
+      }
       if (!mounted) return;
 
       setState(() {
@@ -1032,6 +1074,25 @@ class _BatchHomeState extends State<BatchHome> {
               ),
               onPressed: _showNeuralEngineDialog,
               tooltip: 'Neural Semantic Engine',
+            ),
+          ),
+          const SizedBox(width: 8),
+          // OpenRouter cloud parsing status + management.
+          Tooltip(
+            message: 'OpenRouter — cloud AI contact parsing',
+            child: IconButton(
+              icon: Icon(
+                _openRouterEnabled
+                    ? (OpenRouterOcrService.instance.hasApiKey
+                        ? Icons.cloud
+                        : Icons.cloud_off)
+                    : Icons.cloud_outlined,
+                color: OpenRouterOcrService.instance.hasApiKey
+                    ? _kPrimary
+                    : _kOnSurfaceVariant,
+              ),
+              onPressed: _showNeuralEngineDialog,
+              tooltip: 'OpenRouter Cloud Parsing',
             ),
           ),
           const SizedBox(width: 8),
