@@ -21,7 +21,7 @@ class OpenRouterOcrService {
   static final OpenRouterOcrService instance = OpenRouterOcrService._();
 
   static const String _baseUrl = 'https://openrouter.ai/api/v1/chat/completions';
-  static const String _model = 'meta-llama/llama-3.1-8b-instruct:free';
+  static const String _model = 'qwen/qwen2.5-72b-instruct:free';
 
   static const String _prefsApiKeyKey = 'openrouter.api_key';
   static const String _prefsEnabledKey = 'openrouter.enabled';
@@ -90,27 +90,30 @@ class OpenRouterOcrService {
 
     try {
       final prompt = '''
-You extract contact details from business card OCR text. Return ONLY a JSON object.
+You are a business card OCR extraction engine. Your ONLY job is to extract contact fields from noisy OCR text.
 
-Extract these fields from the OCR text:
-- person_name: the person's full name
-- designation: job title
-- company: organization name
-- email: email address
-- phone: phone number
-- website: website URL
-- address: full physical address
-
-Rules:
-- Use exact text from the OCR lines. Do not invent, complete, or correct words.
-- If a field cannot be identified, use null.
-- Return ONLY valid JSON, no markdown, no explanation.
-
-OCR text:
+OCR TEXT:
 ${rawText}
 
-Response format:
-{"person_name":"...","designation":"...","company":"...","email":"...","phone":"...","website":"...","address":"..."}
+EXTRACTION RULES (read carefully):
+1. person_name: The person's full name. Usually near the top. Do NOT include titles like "CEO", "Manager", "Dr.", "Mr." unless they are part of the printed name. If unsure, leave empty.
+2. designation: Job title / role (e.g. "Water Solutions Engineer", "Founder & CEO", "Sales Manager"). Do NOT confuse this with company name.
+3. company: Organization/business name. Can be without a legal suffix (e.g. "Samanga Utilities", "Acme"). Do NOT extract email domains as company names.
+4. email: Email address(es). Extract every email found.
+5. phone: Phone number(s). Extract every phone found, normalize digits (remove spaces, dashes, parentheses).
+6. website: Website URL (e.g. www.samangasolutions.com). Distinct from email domain.
+7. address: Full physical address. Combine all address lines (street, city, state, postal code, country) into one string separated by ", ".
+
+CRITICAL:
+- Return text EXACTLY as it appears in the OCR. Do NOT invent, correct, or complete words.
+- A job title like "Water Solutions Engineer" is NOT a company name. The company might be "Water Solutions" or something else entirely.
+- If a field cannot be identified with confidence, return null for that field.
+- Return ONLY valid JSON. No markdown, no explanation, no extra text.
+
+JSON FORMAT:
+{"person_name": "...", "designation": "...", "company": "...", "email": "...", "phone": "...", "website": "...", "address": "..."}
+
+Use null for any field you cannot identify.
 ''';
 
       final response = await http.post(
@@ -127,7 +130,7 @@ Response format:
             {'role': 'user', 'content': prompt},
           ],
           'temperature': 0.1,
-          'max_tokens': 500,
+          'max_tokens': 800,
         }),
       ).timeout(const Duration(seconds: 30));
 
@@ -156,12 +159,8 @@ Response format:
         phone: _asString(cardData['phone']) ?? '',
         website: _asString(cardData['website']) ?? '',
         address: _asString(cardData['address']) ?? '',
-        emails: _asString(cardData['email']) != null
-            ? [_asString(cardData['email'])!]
-            : const [],
-        phones: _asString(cardData['phone']) != null
-            ? [_asString(cardData['phone'])!]
-            : const [],
+        emails: _extractList(cardData['emails'] ?? cardData['email']),
+        phones: _extractList(cardData['phones'] ?? cardData['phone']),
         rawText: rawText,
       );
     } catch (_) {
@@ -173,6 +172,17 @@ Response format:
     if (value == null) return null;
     if (value is String) return value;
     return value.toString();
+  }
+
+  /// Extracts a list of strings from either a JSON array or a comma/semicolon-separated string.
+  List<String> _extractList(dynamic value) {
+    if (value == null) return const [];
+    if (value is List) {
+      return value.whereType<String>().map((v) => v.trim()).where((v) => v.isNotEmpty).toList();
+    }
+    final str = value.toString().trim();
+    if (str.isEmpty) return const [];
+    return str.split(RegExp(r'[,;]')).map((v) => v.trim()).where((v) => v.isNotEmpty).toList();
   }
 
   /// Strips markdown code fences and extracts the JSON object from the text.
